@@ -1,37 +1,44 @@
 name: Neon Swarm
 
-# Runs `python neon_swarm.py` forever.
-# GitHub-hosted jobs are hard-capped at 6h, so the job runs for ~5h45m,
-# then re-dispatches this same workflow to keep the swarm alive.
+# Runs `python neon_swarm.py` forever and gives you a temporary PUBLIC link
+# (Cloudflare quick tunnel, no account needed) instead of localhost.
+#
+# GitHub-hosted jobs are capped at 6h, so each run lasts ~5h45m and then
+# re-dispatches this same workflow. Every new run gets a NEW public link.
+#
+# Where the link shows up:
+#   1. Annotation + Summary on the run page (Actions tab)
+#   2. The job log (printed every 5 minutes)
+#   3. Your phone, if you add a repo secret called NTFY_TOPIC (see notes below)
+#
 # Kill switch: cancel the current run (or disable the workflow) and the chain stops.
 
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
-  # Safety net: if the self-relaunch chain ever breaks, this revives it.
+  # Safety net: revives the chain if the self-relaunch ever breaks.
   schedule:
     - cron: "17 */6 * * *"
 
-# Only one swarm at a time; a newer run waits instead of killing the live one.
 concurrency:
   group: neon-swarm
   cancel-in-progress: false
 
 permissions:
   contents: read
-  actions: write   # needed so the job can re-dispatch itself
+  actions: write   # lets the job re-dispatch itself
 
 env:
   PYTHON_VERSION: "3.12"
   PYTHONUNBUFFERED: "1"
   PYTHONDONTWRITEBYTECODE: "1"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
-  SDL_VIDEODRIVER: dummy   # headless pygame, if the script uses it
+  PORT: "8000"             # neon_swarm.py serves on 8000
+  BROWSER: /bin/true       # stop the script from trying to open a browser on the runner
+  SDL_VIDEODRIVER: dummy
   SDL_AUDIODRIVER: dummy
-  MPLBACKEND: Agg          # headless matplotlib
-  FLASK_ENV: production
-  PORT: "5000"
+  MPLBACKEND: Agg
 
 jobs:
   swarm:
@@ -39,8 +46,13 @@ jobs:
     timeout-minutes: 355
 
     steps:
-      - name: Check out repository
+      # Full repo: every file, full history, LFS files and submodules.
+      - name: Check out ALL repository files
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+          submodules: recursive
 
       - name: Make sure the script exists
         run: |
@@ -48,6 +60,17 @@ jobs:
             echo "::error::neon_swarm.py not found in the repository root"
             exit 1
           fi
+          echo "Repo files available to the game:"
+          git ls-files | head -200
+
+      # Keeps the leaderboard between the ~6h relaunches.
+      - name: Restore leaderboard
+        uses: actions/cache@v4
+        with:
+          path: neon_swarm_scores.json
+          key: neon-scores-${{ github.run_id }}
+          restore-keys: |
+            neon-scores-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -68,7 +91,7 @@ jobs:
             libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
             libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
             libpq-dev libsqlite3-dev libbz2-dev libreadline-dev \
-            xvfb ffmpeg
+            xvfb ffmpeg dbus-x11
 
       - name: Install Python dependencies
         run: |
@@ -94,19 +117,94 @@ jobs:
 
           pip list
 
+      # ---------- Public temporary link ----------
+      - name: Install cloudflared
+        run: |
+          curl -fsSL -o cloudflared \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+          sudo mv cloudflared /usr/local/bin/cloudflared
+          cloudflared --version
+
+      - name: Start public tunnel and announce the link
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          cat > "$RUNNER_TEMP/tunnel.sh" <<'EOF'
+          #!/usr/bin/env bash
+          # Keeps a Cloudflare quick tunnel alive. If it ever restarts the URL
+          # changes, so the new one is saved (and pushed to your phone).
+          PORT="${PORT:-8000}"
+          while true; do
+            rm -f "$RUNNER_TEMP/public_url"
+            : > "$RUNNER_TEMP/cf.log"
+            cloudflared tunnel --no-autoupdate --url "http://localhost:${PORT}" \
+              > "$RUNNER_TEMP/cf.log" 2>&1 &
+            CF=$!
+            url=""
+            for i in $(seq 1 60); do
+              url=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$RUNNER_TEMP/cf.log" | head -1)
+              [ -n "$url" ] && break
+              sleep 2
+            done
+            if [ -n "$url" ]; then
+              echo "$url" > "$RUNNER_TEMP/public_url"
+              if [ -n "$NTFY_TOPIC" ]; then
+                curl -s -H "Title: Neon Swarm is live" -H "Click: $url" \
+                  -d "Play here: $url" "https://ntfy.sh/$NTFY_TOPIC" > /dev/null || true
+              fi
+            fi
+            wait "$CF"
+            sleep 3
+          done
+          EOF
+          chmod +x "$RUNNER_TEMP/tunnel.sh"
+          nohup "$RUNNER_TEMP/tunnel.sh" > "$RUNNER_TEMP/tunnel_supervisor.log" 2>&1 &
+
+          # Wait for the first public URL
+          for i in $(seq 1 70); do
+            [ -s "$RUNNER_TEMP/public_url" ] && break
+            sleep 2
+          done
+
+          if [ -s "$RUNNER_TEMP/public_url" ]; then
+            url=$(cat "$RUNNER_TEMP/public_url")
+            echo "PUBLIC LINK: $url"
+            echo "::notice title=Neon Swarm public link::$url"
+            {
+              echo "## Neon Swarm is live"
+              echo ""
+              echo "**Play here (temporary link):** $url"
+              echo ""
+              echo "The link changes every run (~6h). The next run posts a fresh one."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Tunnel did not come up. Log follows:"
+            cat "$RUNNER_TEMP/cf.log" || true
+          fi
+
+      # ---------- The swarm itself ----------
       - name: Run neon_swarm.py (supervised, auto-restarts on crash)
         run: |
           set +e
           deadline=$(( $(date +%s) + 345*60 ))
 
-          # Heartbeat so the log shows the run is alive
-          ( while true; do echo "[heartbeat] $(date -u +%T) UTC - swarm supervisor alive"; sleep 300; done ) &
+          # Heartbeat that also re-prints the current public link
+          (
+            while true; do
+              link="$(cat "$RUNNER_TEMP/public_url" 2>/dev/null || echo 'tunnel starting...')"
+              echo "[heartbeat] $(date -u +%T) UTC - alive - public link: $link"
+              sleep 300
+            done
+          ) &
           HB=$!
 
           while [ "$(date +%s)" -lt "$deadline" ]; do
             remaining=$(( deadline - $(date +%s) ))
             echo "[supervisor] starting neon_swarm.py ($(( remaining / 60 )) min left in this run)"
-            xvfb-run -a timeout --signal=TERM --kill-after=30 "${remaining}" python -u neon_swarm.py
+            # dbus-run-session silences the harmless Chrome/dbus errors
+            xvfb-run -a dbus-run-session -- \
+              timeout --signal=TERM --kill-after=30 "${remaining}" python -u neon_swarm.py
             code=$?
             echo "[supervisor] neon_swarm.py exited with code ${code}; restarting in 3s"
             sleep 3
@@ -114,6 +212,19 @@ jobs:
 
           kill "$HB" 2>/dev/null
           exit 0
+
+      # Snapshot of every repo file (plus the leaderboard) for download.
+      - name: Upload all repo files as an artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: neon-swarm-repo-files-${{ github.run_number }}
+          path: |
+            .
+            !.git/**
+          include-hidden-files: true
+          retention-days: 3
+          if-no-files-found: ignore
 
       - name: Relaunch the swarm (keeps it running forever)
         if: ${{ !cancelled() }}
