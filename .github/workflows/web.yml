@@ -1,0 +1,125 @@
+name: Neon Swarm
+
+# Runs `python neon_swarm.py` forever.
+# GitHub-hosted jobs are hard-capped at 6h, so the job runs for ~5h45m,
+# then re-dispatches this same workflow to keep the swarm alive.
+# Kill switch: cancel the current run (or disable the workflow) and the chain stops.
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+  # Safety net: if the self-relaunch chain ever breaks, this revives it.
+  schedule:
+    - cron: "17 */6 * * *"
+
+# Only one swarm at a time; a newer run waits instead of killing the live one.
+concurrency:
+  group: neon-swarm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write   # needed so the job can re-dispatch itself
+
+env:
+  PYTHON_VERSION: "3.12"
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  SDL_VIDEODRIVER: dummy   # headless pygame, if the script uses it
+  SDL_AUDIODRIVER: dummy
+  MPLBACKEND: Agg          # headless matplotlib
+  FLASK_ENV: production
+  PORT: "5000"
+
+jobs:
+  swarm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Make sure the script exists
+        run: |
+          if [ ! -f neon_swarm.py ]; then
+            echo "::error::neon_swarm.py not found in the repository root"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements*.txt
+            pyproject.toml
+
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config git curl wget \
+            python3-dev libffi-dev libssl-dev libxml2-dev libxslt1-dev \
+            zlib1g-dev libjpeg-dev libpng-dev libfreetype6-dev \
+            libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+            libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+            libpq-dev libsqlite3-dev libbz2-dev libreadline-dev \
+            xvfb ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel build
+
+          # Web / server stack
+          pip install \
+            flask flask-cors flask-socketio flask-sqlalchemy flask-limiter \
+            gunicorn eventlet gevent websockets simple-websocket \
+            requests aiohttp httpx python-dotenv pyyaml jinja2
+
+          # Simulation / math / graphics stack
+          pip install \
+            numpy scipy pandas numba networkx matplotlib pillow \
+            opencv-python-headless pygame noise
+
+          # Quality of life
+          pip install rich colorama tqdm psutil click
+
+          # Project-specific requirements, if present
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f pyproject.toml ]; then pip install . || true; fi
+
+          pip list
+
+      - name: Run neon_swarm.py (supervised, auto-restarts on crash)
+        run: |
+          set +e
+          deadline=$(( $(date +%s) + 345*60 ))
+
+          # Heartbeat so the log shows the run is alive
+          ( while true; do echo "[heartbeat] $(date -u +%T) UTC - swarm supervisor alive"; sleep 300; done ) &
+          HB=$!
+
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            remaining=$(( deadline - $(date +%s) ))
+            echo "[supervisor] starting neon_swarm.py ($(( remaining / 60 )) min left in this run)"
+            xvfb-run -a timeout --signal=TERM --kill-after=30 "${remaining}" python -u neon_swarm.py
+            code=$?
+            echo "[supervisor] neon_swarm.py exited with code ${code}; restarting in 3s"
+            sleep 3
+          done
+
+          kill "$HB" 2>/dev/null
+          exit 0
+
+      - name: Relaunch the swarm (keeps it running forever)
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run "${{ github.workflow }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "${{ github.ref_name }}"
