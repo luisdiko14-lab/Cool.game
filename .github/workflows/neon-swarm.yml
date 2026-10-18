@@ -1,0 +1,426 @@
+name: Neon Swarm
+
+# One workflow run = one chain of legs.
+#   * Each leg is a matrix job with max-parallel: 1, so legs run back-to-back inside this run.
+#   * A leg runs SWARM_MINUTES (GitHub caps a job at 6 h). The next leg starts when it ends.
+#   * Inside a leg, crashes, hangs and memory blow-ups restart the game, and pushes hot-reload it.
+#   * GitHub ends every run after 35 days, so the last leg hands off to one fresh run.
+# Helper files live in .github/neon/ (supervise.sh, tunnel.sh, waking.html).
+
+on:
+  workflow_dispatch:
+    inputs:
+      reset_leaderboard:
+        description: "Wipe the saved leaderboard before leg 1"
+        type: boolean
+        default: false
+      legs:
+        description: "Legs to chain (about 5.6 h each; 140 is about 33 days)"
+        type: number
+        default: 140
+  # Sent by the last leg to start the next chain at GitHub's 35-day run limit.
+  repository_dispatch:
+    types: [neon-swarm-handoff]
+
+concurrency:
+  group: neon-swarm
+  # "Run workflow" restarts the live chain now. Hand-offs queue behind it instead.
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  PORT: "8000"
+  SWARM_MINUTES: "335"     # length of one leg (the job cap is 360)
+  MAX_RSS_MB: "6144"       # restart the game above this much memory
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  BROWSER: /bin/true
+  SDL_VIDEODRIVER: dummy
+  SDL_AUDIODRIVER: dummy
+  MPLBACKEND: Agg
+
+jobs:
+  # ---------------------------------------------------------------- preflight
+  plan:
+    name: Preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      legs: ${{ steps.plan.outputs.legs }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Validate the project and build the leg matrix
+        id: plan
+        env:
+          LEGS_INPUT: ${{ github.event.inputs.legs || '140' }}
+        run: |
+          set -euo pipefail
+          test -f neon_swarm.py || { echo "::error::neon_swarm.py is missing from the repo root"; exit 1; }
+          python -m py_compile neon_swarm.py
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          legs = int(os.environ["LEGS_INPUT"])
+          if not 1 <= legs <= 256:
+              raise SystemExit("legs must be between 1 and 256")
+          print(f"legs={legs}")
+          print("matrix=" + json.dumps({"leg": list(range(1, legs + 1))}))
+          PY
+          {
+            echo "## Preflight passed"
+            echo "- Legs chained in this run: ${LEGS_INPUT}"
+            echo "- Tracked files: $(git ls-files | wc -l)"
+            echo "- Latest commit: $(git log -1 --format='%h %s')"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ------------------------------------------------- quality (advisory only)
+  quality:
+    name: Lint, tests and audit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install tools and requirements
+        continue-on-error: true
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ruff pytest pip-audit
+          if [ -f requirements.txt ]; then python -m pip install --prefer-binary -r requirements.txt; fi
+
+      - name: Ruff - fatal errors only (syntax errors, undefined names)
+        continue-on-error: true
+        run: ruff check --select E9,F63,F7,F82 --output-format=github .
+
+      - name: Tests (skipped when there are none)
+        continue-on-error: true
+        run: |
+          if find . -path ./.git -prune -o \( -name 'test_*.py' -o -name '*_test.py' \) -print | grep -q .; then
+            python -m pytest -q
+          else
+            echo "No tests found"
+          fi
+
+      - name: Dependency audit
+        continue-on-error: true
+        run: |
+          if [ -f requirements.txt ]; then pip-audit -r requirements.txt; else echo "No requirements.txt"; fi
+
+  # ---------------------------------------------- the swarm: a chain of legs
+  swarm:
+    name: "Leg ${{ matrix.leg }} of ${{ needs.plan.outputs.legs }}"
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 358
+    permissions:
+      contents: write        # hot-reload fetches; the hand-off sends repository_dispatch
+    strategy:
+      fail-fast: false
+      max-parallel: 1        # one leg at a time, all inside this one workflow run
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+
+    steps:
+      - name: Start the leg clock
+        env:
+          LEG: ${{ matrix.leg }}
+          LEGS_TOTAL: ${{ needs.plan.outputs.legs }}
+        run: |
+          {
+            echo "SWARM_DEADLINE=$(( $(date +%s) + SWARM_MINUTES * 60 ))"
+            echo "LEG_STARTED=$(date -u '+%Y-%m-%d %H:%M UTC')"
+          } >> "$GITHUB_ENV"
+          echo "Leg ${LEG} of ${LEGS_TOTAL} - runs for ${SWARM_MINUTES} minutes"
+
+      - name: Check out the latest code (every file, LFS, submodules, history)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          lfs: true
+          submodules: recursive
+
+      - name: Restore leaderboard and state from the previous leg
+        if: ${{ github.event.inputs.reset_leaderboard != 'true' || matrix.leg != 1 }}
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            neon_swarm_scores.json
+            .neon-state
+          key: neon-swarm-state-${{ github.run_id }}-leg-${{ matrix.leg }}
+          restore-keys: |
+            neon-swarm-state-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Restore pip cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('requirements*.txt', 'pyproject.toml') }}
+          restore-keys: |
+            pip-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+
+      - name: Set up Node.js (only if package.json exists)
+        if: ${{ hashFiles('package.json') != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install system build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config git curl wget jq rsync \
+            xvfb xauth dbus-x11 ffmpeg \
+            libffi-dev libssl-dev libxml2-dev libxslt1-dev zlib1g-dev \
+            libjpeg-dev libpng-dev libfreetype6-dev \
+            libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+            libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+            libpq-dev libsqlite3-dev libbz2-dev libreadline-dev
+          # Optional extras: a missing one must not break the whole leg
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev portaudio19-dev libwebp-dev libxkbcommon0 fonts-dejavu-core \
+            || echo "::warning::some optional system packages were not available"
+
+      - name: Install Python packages (retries on flaky downloads)
+        run: |
+          retry() {
+            for try in 1 2 3; do
+              "$@" && return 0
+              echo "::warning::attempt ${try} failed - retrying"
+              sleep 20
+            done
+            return 1
+          }
+          retry python -m pip install --upgrade pip setuptools wheel
+          retry python -m pip install --prefer-binary \
+            flask flask-cors flask-socketio flask-sqlalchemy flask-limiter flask-login flask-compress \
+            gunicorn gevent eventlet websockets simple-websocket \
+            requests httpx aiohttp python-dotenv pyyaml jinja2 \
+            numpy scipy pandas numba networkx matplotlib pillow \
+            opencv-python-headless pygame noise \
+            rich colorama tqdm psutil click
+          if [ -f requirements.txt ]; then
+            retry python -m pip install --prefer-binary -r requirements.txt
+          fi
+          if [ -f pyproject.toml ]; then
+            python -m pip install --prefer-binary . || echo "::warning::pyproject.toml did not install as a package"
+          fi
+          if [ -f requirements.txt ] && grep -qi '^playwright' requirements.txt; then
+            python -m playwright install --with-deps chromium
+          fi
+          python -m pip list
+
+      - name: npm install (only if package.json exists)
+        if: ${{ hashFiles('package.json') != '' }}
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Build (only if a Makefile exists)
+        run: |
+          if [ -f Makefile ]; then make -j"$(nproc)"; else echo "No Makefile - nothing to build"; fi
+
+      - name: Check the game imports before the leg starts
+        run: |
+          python -m py_compile neon_swarm.py
+          python - <<'PY'
+          import importlib
+          for mod in ["flask", "numpy", "pygame", "psutil"]:
+              try:
+                  importlib.import_module(mod)
+                  print(f"ok       {mod}")
+              except Exception as exc:
+                  print(f"MISSING  {mod}: {exc}")
+          PY
+
+      - name: Start the virtual display and D-Bus session
+        run: |
+          set +e
+          Xvfb :99 -screen 0 1280x720x24 -nolisten tcp -ac > "$RUNNER_TEMP/xvfb.log" 2>&1 &
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          eval "$(dbus-launch --sh-syntax)"
+          {
+            echo "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS}"
+            echo "DBUS_SESSION_BUS_PID=${DBUS_SESSION_BUS_PID}"
+          } >> "$GITHUB_ENV"
+          sleep 2
+          exit 0
+
+      - name: Start the public link (waking page first, tunnel second)
+        env:
+          LEG: ${{ matrix.leg }}
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+          NGROK_DOMAIN: ${{ vars.NGROK_DOMAIN }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          set +e
+          STATE="$RUNNER_TEMP/neon"
+          mkdir -p "$STATE/wake" .neon-state
+
+          # A waking page answers on the game port, so the link never goes dead during setup.
+          cp .github/neon/waking.html "$STATE/wake/index.html"
+          python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$STATE/wake" > "$STATE/wake.log" 2>&1 &
+          echo $! > "$STATE/wake.pid"
+
+          # Install the tunnel client: ngrok gives a fixed link, cloudflared gives a random one.
+          if [ -n "$NGROK_AUTHTOKEN" ]; then
+            command -v ngrok >/dev/null || curl -fsSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | sudo tar -xz -C /usr/local/bin
+          else
+            command -v cloudflared >/dev/null || { sudo curl -fsSL -o /usr/local/bin/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 && sudo chmod +x /usr/local/bin/cloudflared; }
+          fi
+
+          chmod +x .github/neon/tunnel.sh
+          nohup .github/neon/tunnel.sh "$STATE" "$PORT" > "$STATE/tunnel-supervisor.log" 2>&1 &
+          echo $! > "$STATE/tunnel.pid"
+
+          url=""
+          for _ in $(seq 1 60); do
+            if [ -s "$STATE/public_url" ]; then url="$(cat "$STATE/public_url")"; break; fi
+            sleep 2
+          done
+
+          if [ -n "$url" ]; then
+            echo "::notice title=Neon Swarm is live::$url"
+            {
+              echo "## Public link (leg ${LEG})"
+              echo ""
+              echo "**Play here:** $url"
+              echo ""
+              if [ -n "$NGROK_DOMAIN" ]; then
+                echo "_Fixed link: the same address every leg and every restart._"
+              else
+                echo "_Random link that changes each leg. Set NGROK_DOMAIN for a fixed one._"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+            previous="$(cat .neon-state/last_url 2>/dev/null || true)"
+            if [ -n "$NTFY_TOPIC" ] && { [ "$LEG" = "1" ] || [ "$previous" != "$url" ]; }; then
+              curl -fsS -H "Title: Neon Swarm is live" -H "Click: $url" -d "Play here: $url" "https://ntfy.sh/$NTFY_TOPIC" > /dev/null || true
+            fi
+            echo "$url" > .neon-state/last_url
+          else
+            echo "::warning::No public link yet. The game still starts. Tunnel log follows."
+            tail -n 30 "$STATE/tunnel.log" 2>/dev/null
+          fi
+          exit 0
+
+      - name: Run the swarm (supervised, hot-reloading, watched)
+        env:
+          LEG: ${{ matrix.leg }}
+          LEGS_TOTAL: ${{ needs.plan.outputs.legs }}
+        run: bash .github/neon/supervise.sh
+
+      - name: Stop the tunnel and waking page (frees the link for the next leg)
+        if: ${{ always() }}
+        run: |
+          set +e
+          STATE="$RUNNER_TEMP/neon"
+          for f in tunnel.pid wake.pid; do
+            if [ -s "$STATE/$f" ]; then kill "$(cat "$STATE/$f")" 2>/dev/null; fi
+          done
+          pkill -f 'neon/tunnel.sh' 2>/dev/null
+          pkill -x ngrok 2>/dev/null
+          pkill -x cloudflared 2>/dev/null
+          exit 0
+
+      - name: Save leaderboard and state for the next leg
+        if: ${{ always() }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            neon_swarm_scores.json
+            .neon-state
+          key: neon-swarm-state-${{ github.run_id }}-leg-${{ matrix.leg }}
+
+      - name: Snapshot every repo file plus logs
+        if: ${{ always() }}
+        run: |
+          set +e
+          STATE="$RUNNER_TEMP/neon"
+          STAGE="$RUNNER_TEMP/repo-snapshot"
+          rm -rf "$STAGE" && mkdir -p "$STAGE/logs"
+          rsync -a --exclude='.git/' --exclude='__pycache__/' --exclude='.venv/' --exclude='venv/' --exclude='node_modules/' ./ "$STAGE/"
+          for f in events.log tunnel.log; do cp "$STATE/$f" "$STAGE/logs/" 2>/dev/null; done
+          gzip -c "$STATE/game.log" > "$STAGE/logs/game.log.gz" 2>/dev/null
+          cd "$STAGE" && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS.txt
+          echo "Snapshot holds $(wc -l < SHA256SUMS.txt) files"
+
+      - name: Upload the snapshot artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-snapshot-leg-${{ matrix.leg }}
+          path: ${{ runner.temp }}/repo-snapshot
+          include-hidden-files: true
+          retention-days: 2
+          if-no-files-found: ignore
+
+      - name: Leg report
+        if: ${{ always() }}
+        env:
+          LEG: ${{ matrix.leg }}
+          LEGS_TOTAL: ${{ needs.plan.outputs.legs }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          set +e
+          STATE="$RUNNER_TEMP/neon"
+          count() {
+            local n
+            n="$(grep -c -- "$1" "$STATE/events.log" 2>/dev/null)"
+            echo "${n:-0}"
+          }
+          crashes="$(count 'crash #')"
+          {
+            echo "## Leg ${LEG} of ${LEGS_TOTAL} finished"
+            echo ""
+            echo "| Item | Value |"
+            echo "|---|---|"
+            echo "| Started | ${LEG_STARTED:-unknown} |"
+            echo "| Public link | $(cat "$STATE/public_url" 2>/dev/null || echo none) |"
+            echo "| Crash restarts | ${crashes} |"
+            echo "| Hot reloads from pushes | $(count 'new commit') |"
+            echo "| Health restarts | $(count 'no answer') |"
+            echo "| Memory restarts | $(count 'game uses') |"
+            echo ""
+            echo "<details><summary>Last events</summary>"
+            echo ""
+            echo '```'
+            tail -n 15 "$STATE/events.log" 2>/dev/null
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$crashes" -ge 20 ] && [ -n "$NTFY_TOPIC" ]; then
+            curl -fsS -H "Title: Neon Swarm is crash-looping" -H "Priority: high" \
+              -d "Leg ${LEG}: ${crashes} crash restarts. Check the run log." \
+              "https://ntfy.sh/$NTFY_TOPIC" > /dev/null || true
+          fi
+          exit 0
+
+      - name: Hand off to the next chain (last leg only, because GitHub ends runs at 35 days)
+        if: ${{ !cancelled() && matrix.leg == fromJSON(needs.plan.outputs.legs) }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::notice::Last leg reached - queuing the next chain"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" -f event_type=neon-swarm-handoff
