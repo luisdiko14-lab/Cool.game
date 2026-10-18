@@ -175,7 +175,7 @@ const Settings={key:'neonswarm.settings',data:{music:true,musicVolume:.35,effect
   close(){Game.set(this.returnTo)}};
 const Admin={password:'12345678',key:'neonswarm.admin',config:{fireRate:10,damage:500,shieldDuration:10},unlocked:false,pendingShield:0,returnTo:'menu',
   init(){let saved={};try{saved=JSON.parse(localStorage.getItem(this.key))||{}}catch(e){}
-    this.config={fireRate:clamp(Number(saved.fireRate)||10,1,30),damage:clamp(Number(saved.damage)||500,1,10000),shieldDuration:clamp(Number(saved.shieldDuration)||10,1,600)};this.render()},
+    this.config={fireRate:clamp(Number(saved.fireRate)||10,1,30),damage:clamp(Number(saved.damage)||500,1,1000000),shieldDuration:clamp(Number(saved.shieldDuration)||10,1,100)};this.render()},
   save(){try{localStorage.setItem(this.key,JSON.stringify(this.config))}catch(e){}},
   render(){$('admin-fire-rate').value=this.config.fireRate;$('admin-fire-rate-value').textContent=this.config.fireRate;$('admin-damage').value=this.config.damage;$('admin-damage-value').textContent=this.config.damage;$('admin-shield-duration').value=this.config.shieldDuration},
   open(from){this.returnTo=from;$('admin-lock-status').textContent='';$('admin-password').value='';Game.set(this.unlocked?'admin':'admin-lock')},
