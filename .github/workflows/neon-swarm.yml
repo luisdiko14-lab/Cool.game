@@ -9,8 +9,13 @@ name: Neon Swarm
 #   * Inside a leg: crashes, hangs and memory blow-ups restart the game, and pushes hot-reload it.
 #   * GitHub ends every run after 35 days, so the last leg hands off to one fresh run.
 #
-# Fixed link (same every leg, every restart): add secret NGROK_AUTHTOKEN and variable NGROK_DOMAIN.
-# Without them you get a random trycloudflare.com link that changes each leg.
+# PUBLIC LINK (never localhost):
+#   1. trycloudflare.com  - default, free, no account (a random link that changes each leg)
+#   2. localhost.run      - automatic backup if cloudflared cannot connect
+#   3. ngrok              - optional; add secret NGROK_AUTHTOKEN and variable NGROK_DOMAIN
+#                           for a FIXED link that stays the same every leg and restart
+# The link is shown in the run's Summary, as an annotation, and in the log. The game's own
+# "localhost" line in the log is rewritten to show the public link instead.
 # Phone alerts: add secret NTFY_TOPIC and subscribe to it in the ntfy app.
 
 on:
@@ -299,9 +304,11 @@ jobs:
           # ---------------- tunnel keeper ----------------
           cat > "$BIN/tunnel.sh" <<'TUNNEL_EOF'
           #!/usr/bin/env bash
-          # Keeps a public tunnel alive for the whole leg and publishes its URL to <state>/public_url.
-          #   NGROK_AUTHTOKEN set  -> ngrok. With NGROK_DOMAIN the link is fixed across legs.
-          #   no token             -> cloudflared quick tunnel (random link that changes).
+          # Keeps a public (non-localhost) link alive for the whole leg.
+          # Providers are tried in order, and the first one that gives a link wins:
+          #   ngrok (only if NGROK_AUTHTOKEN is set) -> cloudflared (trycloudflare.com) -> localhost.run
+          # The current URL is published to <state>/public_url, its provider to <state>/public_provider.
+          # If the link dies, or the client exits, everything restarts from the first provider.
           # Usage: tunnel.sh <state_dir> <port>
           STATE="$1"
           PORT="$2"
@@ -309,50 +316,118 @@ jobs:
           URL_FILE="$STATE/public_url"
           : > "$LOG"
 
-          run_tunnel() {
-            while true; do
-              if [ -n "${NGROK_AUTHTOKEN:-}" ]; then
-                if [ -n "${NGROK_DOMAIN:-}" ]; then
-                  ngrok http "$PORT" --url "$NGROK_DOMAIN" --log=stdout >> "$LOG" 2>&1
-                else
-                  ngrok http "$PORT" --log=stdout >> "$LOG" 2>&1
-                fi
-              else
-                cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:${PORT}" >> "$LOG" 2>&1
-              fi
-              echo "[tunnel] $(date -u +%T) client exited - restarting in 10s" >> "$LOG"
-              sleep 10
-            done
-          }
+          log() { echo "[tunnel] $(date -u +%T) $*" >> "$LOG"; }
 
-          find_url() {
+          providers() {
             if [ -n "${NGROK_AUTHTOKEN:-}" ]; then
-              curl -s -m 3 http://127.0.0.1:4040/api/tunnels \
-                | jq -r '.tunnels[]?.public_url // empty' | grep '^https://' | head -1
+              echo "ngrok cloudflared localhostrun"
             else
-              grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG" | tail -1
+              echo "cloudflared localhostrun"
             fi
           }
 
-          run_tunnel &
+          # Starts one tunnel client in the background; sets CLIENT (pid) and writes to CLIENT_LOG.
+          start_client() {
+            case "$1" in
+              ngrok)
+                if [ -n "${NGROK_DOMAIN:-}" ]; then
+                  ngrok http "$PORT" --url "$NGROK_DOMAIN" --log=stdout > "$CLIENT_LOG" 2>&1 &
+                else
+                  ngrok http "$PORT" --log=stdout > "$CLIENT_LOG" 2>&1 &
+                fi
+                ;;
+              cloudflared)
+                cloudflared tunnel --no-autoupdate --protocol http2 \
+                  --url "http://127.0.0.1:${PORT}" > "$CLIENT_LOG" 2>&1 &
+                ;;
+              localhostrun)
+                ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                  -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes -o BatchMode=yes \
+                  -R "80:127.0.0.1:${PORT}" nokey@localhost.run > "$CLIENT_LOG" 2>&1 &
+                ;;
+            esac
+            CLIENT=$!
+          }
 
-          missing=0
-          while true; do
-            url="$(find_url)"
-            if [ -n "$url" ]; then
-              echo "$url" > "$URL_FILE"
-              missing=0
-            else
-              rm -f "$URL_FILE"
-              missing=$((missing + 1))
-              if [ "$missing" -ge 18 ]; then
-                echo "[tunnel] $(date -u +%T) no link for 3 min - restarting the tunnel" >> "$LOG"
-                pkill -x ngrok 2>/dev/null
-                pkill -x cloudflared 2>/dev/null
-                missing=0
-              fi
+          # Prints the public https URL of the given provider, or nothing yet.
+          find_url() {
+            case "$1" in
+              ngrok)
+                curl -s -m 3 http://127.0.0.1:4040/api/tunnels \
+                  | jq -r '.tunnels[]?.public_url // empty' | grep '^https://' | head -1
+                ;;
+              cloudflared)
+                grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$CLIENT_LOG" | grep -v '//api\.' | tail -1
+                ;;
+              localhostrun)
+                grep -oE 'https://[a-z0-9-]+\.lhr\.life' "$CLIENT_LOG" | tail -1
+                ;;
+            esac
+          }
+
+          # Remembers the last link and pushes it to your phone when it changed.
+          notify() {
+            local url="$1" prev=""
+            local memo="${GITHUB_WORKSPACE:-.}/.neon-state/last_url"
+            mkdir -p "$(dirname "$memo")"
+            prev="$(cat "$memo" 2>/dev/null || true)"
+            echo "$url" > "$memo"
+            if [ -n "${NTFY_TOPIC:-}" ] && [ "$prev" != "$url" ]; then
+              curl -fsS -m 10 -H "Title: Neon Swarm is live" -H "Click: $url" \
+                -d "Play here: $url" "https://ntfy.sh/${NTFY_TOPIC}" > /dev/null 2>&1 || true
             fi
-            sleep 10
+          }
+
+          while true; do
+            for p in $(providers); do
+              CLIENT_LOG="$STATE/client-$p.log"
+              : > "$CLIENT_LOG"
+              log "starting $p"
+              start_client "$p"
+
+              url=""
+              for _ in $(seq 1 45); do
+                kill -0 "$CLIENT" 2>/dev/null || break
+                url="$(find_url "$p")"
+                [ -n "$url" ] && break
+                sleep 2
+              done
+
+              if [ -z "$url" ]; then
+                log "$p gave no link - trying the next provider"
+                tail -n 5 "$CLIENT_LOG" >> "$LOG" 2>/dev/null
+                kill "$CLIENT" 2>/dev/null
+                sleep 1
+                continue
+              fi
+
+              echo "$url" > "$URL_FILE"
+              echo "$p" > "$STATE/public_provider"
+              log "$p link ready: $url"
+              notify "$url"
+
+              # Stay with this provider while its client lives and the link answers.
+              bad=0
+              tick=0
+              while kill -0 "$CLIENT" 2>/dev/null; do
+                sleep 10
+                tick=$((tick + 1))
+                if [ $((tick % 6)) -eq 0 ]; then
+                  code="$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$url" 2>/dev/null)"
+                  if [ "$code" = "000" ] || [ "$code" = "530" ]; then bad=$((bad + 1)); else bad=0; fi
+                  if [ "$bad" -ge 3 ]; then
+                    log "$p link stopped answering - restarting the tunnel"
+                    break
+                  fi
+                fi
+              done
+              kill "$CLIENT" 2>/dev/null
+              wait "$CLIENT" 2>/dev/null
+              rm -f "$URL_FILE"
+              log "$p ended - starting over"
+              break
+            done
+            sleep 5
           done
           TUNNEL_EOF
 
@@ -513,10 +588,21 @@ jobs:
             stop_game
           }
 
+          # Kills every descendant of a process, deepest first. A plain "pkill -P" misses the
+          # sleeps inside the watchers, and those orphans keep the step's output open for minutes.
+          kill_descendants() {
+            local child
+            for child in $(pgrep -P "$1" 2>/dev/null); do
+              kill_descendants "$child"
+              kill "$child" 2>/dev/null
+            done
+          }
+
           cleanup() {
+            trap - EXIT
             touch "$STOP"
             stop_game
-            pkill -P $$ 2>/dev/null
+            kill_descendants $$
             ev "[shutdown] game and watchers stopped"
           }
           trap cleanup EXIT
@@ -526,7 +612,18 @@ jobs:
 
           ev "[supervisor] leg ${LEG}/${LEGS_TOTAL} online - stops in $(( (SWARM_DEADLINE - $(date +%s)) / 60 )) min"
 
-          tail -n +1 -F "$GAME_LOG" | grep --line-buffered -v 'HTTP/1.1"' &
+          # Show the game's output, with its "localhost" address swapped for the public link.
+          local_url="http://localhost:${PORT}"
+          tail -n +1 -F "$GAME_LOG" | while IFS= read -r line; do
+            case "$line" in *'HTTP/1.1"'*) continue ;; esac
+            link="$(cat "$STATE/public_url" 2>/dev/null)"
+            if [ -n "$link" ]; then
+              line="${line//"$local_url"/$link}"
+              line="${line//Play on this computer:/Play from anywhere:}"
+              case "$line" in *"restart with --lan"*) line="  Phones and friends: just open the same link" ;; esac
+            fi
+            printf '%s\n' "$line"
+          done &
           watch_repo &
           watch_health &
           watch_memory &
@@ -592,21 +689,31 @@ jobs:
           python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$STATE/wake" > "$STATE/wake.log" 2>&1 &
           echo $! > "$STATE/wake.pid"
 
-          # Install the tunnel client: ngrok gives a fixed link, cloudflared gives a random one.
-          if [ -n "$NGROK_AUTHTOKEN" ]; then
-            command -v ngrok >/dev/null || curl -fsSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | sudo tar -xz -C /usr/local/bin
-          else
-            command -v cloudflared >/dev/null || { sudo curl -fsSL -o /usr/local/bin/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 && sudo chmod +x /usr/local/bin/cloudflared; }
+          # Install cloudflared (trycloudflare.com links, no account needed), with retries.
+          for try in 1 2 3; do
+            command -v cloudflared >/dev/null && break
+            sudo curl -fsSL -o /usr/local/bin/cloudflared \
+              https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+              && sudo chmod +x /usr/local/bin/cloudflared && break
+            echo "::warning::cloudflared download failed (try ${try})"
+            sleep 5
+          done
+          command -v cloudflared >/dev/null && cloudflared --version
+
+          # Optional: ngrok, only used when NGROK_AUTHTOKEN is set (gives a fixed link).
+          if [ -n "$NGROK_AUTHTOKEN" ] && ! command -v ngrok >/dev/null; then
+            curl -fsSL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | sudo tar -xz -C /usr/local/bin
           fi
 
           nohup "$STATE/bin/tunnel.sh" "$STATE" "$PORT" > "$STATE/tunnel-supervisor.log" 2>&1 &
           echo $! > "$STATE/tunnel.pid"
 
           url=""
-          for _ in $(seq 1 60); do
+          for _ in $(seq 1 90); do
             if [ -s "$STATE/public_url" ]; then url="$(cat "$STATE/public_url")"; break; fi
             sleep 2
           done
+          provider="$(cat "$STATE/public_provider" 2>/dev/null || echo unknown)"
 
           if [ -n "$url" ]; then
             echo "::notice title=Neon Swarm is live::$url"
@@ -615,17 +722,12 @@ jobs:
               echo ""
               echo "**Play here:** $url"
               echo ""
-              if [ -n "$NGROK_DOMAIN" ]; then
-                echo "_Fixed link: the same address every leg and every restart._"
-              else
+              echo "_Provider: ${provider}. If this link ever changes, the log and your phone alert show the new one._"
+              if [ "$provider" != "ngrok" ]; then
                 echo "_Random link that changes each leg. Set NGROK_AUTHTOKEN and NGROK_DOMAIN for a fixed one._"
               fi
             } >> "$GITHUB_STEP_SUMMARY"
-            previous="$(cat .neon-state/last_url 2>/dev/null || true)"
-            if [ -n "$NTFY_TOPIC" ] && { [ "$LEG" = "1" ] || [ "$previous" != "$url" ]; }; then
-              curl -fsS -H "Title: Neon Swarm is live" -H "Click: $url" -d "Play here: $url" "https://ntfy.sh/$NTFY_TOPIC" > /dev/null || true
-            fi
-            echo "$url" > .neon-state/last_url
+            echo "PUBLIC LINK ($provider): $url"
           else
             echo "::warning::No public link yet. The game still starts. Tunnel log follows."
             tail -n 30 "$STATE/tunnel.log" 2>/dev/null
