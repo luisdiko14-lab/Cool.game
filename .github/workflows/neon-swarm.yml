@@ -17,7 +17,7 @@ on:
       legs:
         description: "Legs to chain (about 5.6 h each; 140 is about 33 days)"
         type: number
-        default: 140
+        default: 200
   # Sent by the last leg to start the next chain at GitHub's 35-day run limit.
   repository_dispatch:
     types: [neon-swarm-handoff]
