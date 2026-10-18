@@ -1,997 +1,833 @@
 
 #requires -Version 5.1
-<#
-    PowerShell Ultimate Hub v1.0
-    Download Manager, Archive Extractor & Mini Task Manager
-    Windows PowerShell 5.1+
-#>
 
-Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-# ------------------------- Configuration -------------------------
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
+} catch {}
 
+$script:AppTitle = 'PowerShell Ultimate Hub v1.0'
 $script:DefaultUrl = 'https://github.com/luisdiko14-lab/Cool.game/archive/refs/tags/v3beta.zip'
 $script:DownloadClient = $null
-$script:DownloadTask = $null
+$script:DownloadActive = $false
+$script:DownloadTempPath = $null
+$script:DownloadFinalPath = $null
 $script:DownloadCancellation = $null
-$script:DownloadedFile = $null
-$script:IsDownloading = $false
-$script:DownloadStarted = $null
-$script:LastCpuSnapshot = @{}
-$script:ProcessRefreshBusy = $false
 
-$script:Colors = @{
-    Background = [System.Drawing.Color]::FromArgb(24, 26, 32)
-    Panel      = [System.Drawing.Color]::FromArgb(32, 35, 43)
-    Input      = [System.Drawing.Color]::FromArgb(42, 46, 56)
-    Accent     = [System.Drawing.Color]::FromArgb(83, 126, 245)
-    Success    = [System.Drawing.Color]::FromArgb(66, 190, 130)
-    Danger     = [System.Drawing.Color]::FromArgb(225, 79, 89)
-    Text       = [System.Drawing.Color]::FromArgb(235, 238, 245)
-    Muted      = [System.Drawing.Color]::FromArgb(155, 163, 179)
-    Border     = [System.Drawing.Color]::FromArgb(57, 62, 74)
+$script:C = @{
+    Background = [Drawing.Color]::FromArgb(18,20,28)
+    Panel      = [Drawing.Color]::FromArgb(27,30,41)
+    Input      = [Drawing.Color]::FromArgb(35,39,53)
+    Foreground = [Drawing.Color]::FromArgb(235,238,248)
+    Muted      = [Drawing.Color]::FromArgb(155,163,184)
+    Accent     = [Drawing.Color]::FromArgb(108,92,231)
+    Green      = [Drawing.Color]::FromArgb(46,204,113)
+    Red        = [Drawing.Color]::FromArgb(255,91,110)
 }
-
-$script:Font = New-Object System.Drawing.Font('Segoe UI', 9)
-$script:FontBold = New-Object System.Drawing.Font(
-    'Segoe UI', 10, [System.Drawing.FontStyle]::Bold
-)
-
-# ------------------------- Helpers -------------------------
 
 function Write-Log {
-    param(
-        [Parameter(Mandatory = $true)][string]$Message,
-        [ValidateSet('INFO', 'OK', 'WARN', 'ERROR')][string]$Level = 'INFO'
-    )
+    param([string]$Message, [string]$Level = 'INFO')
 
-    if ($null -eq $script:LogBox -or $script:LogBox.IsDisposed) {
-        return
-    }
+    if ($null -eq $script:LogBox -or $script:LogBox.IsDisposed) { return }
 
-    $color = switch ($Level) {
-        'OK'    { $script:Colors.Success }
-        'WARN'  { [System.Drawing.Color]::FromArgb(240, 185, 80) }
-        'ERROR' { $script:Colors.Danger }
-        default { $script:Colors.Muted }
-    }
+    $line = '[{0}] [{1}] {2}{3}' -f (Get-Date -Format 'HH:mm:ss'), $Level, $Message, [Environment]::NewLine
 
-    $line = '[{0}] [{1}] {2}{3}' -f (
-        (Get-Date).ToString('HH:mm:ss'),
-        $Level,
-        $Message,
-        [Environment]::NewLine
-    )
-
-    $script:LogBox.SelectionStart = $script:LogBox.TextLength
-    $script:LogBox.SelectionColor = $color
-    $script:LogBox.AppendText($line)
-    $script:LogBox.SelectionColor = $script:Colors.Text
-    $script:LogBox.ScrollToCaret()
+    try {
+        if ($script:LogBox.InvokeRequired) {
+            $script:LogBox.BeginInvoke([Action[string]]{
+                param($value)
+                if (-not $script:LogBox.IsDisposed) {
+                    $script:LogBox.AppendText($value)
+                }
+            }, $line) | Out-Null
+        } else {
+            $script:LogBox.AppendText($line)
+        }
+    } catch {}
 }
 
-function Show-Error {
-    param([string]$Message)
-
-    [void][System.Windows.Forms.MessageBox]::Show(
-        $script:Form,
-        $Message,
-        'PowerShell Ultimate Hub',
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Error
+function New-Label {
+    param(
+        [string]$Text,
+        [int]$X,
+        [int]$Y,
+        [int]$Width = 200,
+        [int]$Height = 24,
+        [int]$FontSize = 10,
+        [Drawing.Color]$Color = $script:C.Foreground
     )
+
+    $c = New-Object Windows.Forms.Label
+    $c.Text = $Text
+    $c.Location = New-Object Drawing.Point($X,$Y)
+    $c.Size = New-Object Drawing.Size($Width,$Height)
+    $c.ForeColor = $Color
+    $c.BackColor = [Drawing.Color]::Transparent
+    $c.Font = New-Object Drawing.Font('Segoe UI',[single]$FontSize)
+    $c.TextAlign = [Drawing.ContentAlignment]::MiddleLeft
+    return $c
+}
+
+function New-Button {
+    param(
+        [string]$Text,
+        [int]$X,
+        [int]$Y,
+        [int]$Width,
+        [int]$Height = 36,
+        [switch]$Secondary
+    )
+
+    $c = New-Object Windows.Forms.Button
+    $c.Text = $Text
+    $c.Location = New-Object Drawing.Point($X,$Y)
+    $c.Size = New-Object Drawing.Size($Width,$Height)
+    $c.FlatStyle = [Windows.Forms.FlatStyle]::Flat
+    $c.FlatAppearance.BorderSize = 0
+    $c.FlatAppearance.MouseOverBackColor = [Drawing.Color]::FromArgb(128,112,255)
+    $c.BackColor = if ($Secondary) { $script:C.Input } else { $script:C.Accent }
+    $c.ForeColor = $script:C.Foreground
+    $c.Cursor = [Windows.Forms.Cursors]::Hand
+    $c.Font = New-Object Drawing.Font('Segoe UI Semibold',[single]9)
+    return $c
+}
+
+function New-Panel {
+    param([int]$X,[int]$Y,[int]$Width,[int]$Height)
+
+    $c = New-Object Windows.Forms.Panel
+    $c.Location = New-Object Drawing.Point($X,$Y)
+    $c.Size = New-Object Drawing.Size($Width,$Height)
+    $c.BackColor = $script:C.Panel
+    return $c
+}
+
+function New-TextBox {
+    param([string]$Text,[int]$X,[int]$Y,[int]$Width,[int]$Height = 32)
+
+    $c = New-Object Windows.Forms.TextBox
+    $c.Text = $Text
+    $c.Location = New-Object Drawing.Point($X,$Y)
+    $c.Size = New-Object Drawing.Size($Width,$Height)
+    $c.BackColor = $script:C.Input
+    $c.ForeColor = $script:C.Foreground
+    $c.BorderStyle = [Windows.Forms.BorderStyle]::FixedSingle
+    $c.Font = New-Object Drawing.Font('Segoe UI',[single]9.5)
+    return $c
 }
 
 function Format-Bytes {
     param([long]$Bytes)
 
-    if ($Bytes -lt 0) { return 'Unknown' }
-    if ($Bytes -ge 1TB) { return ('{0:N2} TB' -f ($Bytes / 1TB)) }
     if ($Bytes -ge 1GB) { return ('{0:N2} GB' -f ($Bytes / 1GB)) }
     if ($Bytes -ge 1MB) { return ('{0:N2} MB' -f ($Bytes / 1MB)) }
     if ($Bytes -ge 1KB) { return ('{0:N2} KB' -f ($Bytes / 1KB)) }
-    return "$Bytes B"
+    return "$Bytes bytes"
 }
 
-function New-UiLabel {
-    param(
-        [string]$Text,
-        [int]$X,
-        [int]$Y,
-        [int]$Width = 180,
-        [int]$Height = 24
-    )
+function Set-DownloadStatus {
+    param([string]$Text,[Drawing.Color]$Color = $script:C.Muted)
 
-    $control = New-Object System.Windows.Forms.Label
-    $control.Text = $Text
-    $control.Location = New-Object System.Drawing.Point($X, $Y)
-    $control.Size = New-Object System.Drawing.Size($Width, $Height)
-    $control.ForeColor = $script:Colors.Text
-    $control.BackColor = [System.Drawing.Color]::Transparent
-    $control.Font = $script:Font
-    $control.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-    return $control
+    if ($null -ne $script:DownloadStatus -and -not $script:DownloadStatus.IsDisposed) {
+        $script:DownloadStatus.Text = $Text
+        $script:DownloadStatus.ForeColor = $Color
+    }
 }
 
-function New-UiTextBox {
-    param(
-        [int]$X,
-        [int]$Y,
-        [int]$Width,
-        [string]$Value = ''
-    )
+function Get-SafeFileName {
+    param([Uri]$Uri)
 
-    $control = New-Object System.Windows.Forms.TextBox
-    $control.Location = New-Object System.Drawing.Point($X, $Y)
-    $control.Size = New-Object System.Drawing.Size($Width, 29)
-    $control.Text = $Value
-    $control.Font = $script:Font
-    $control.BackColor = $script:Colors.Input
-    $control.ForeColor = $script:Colors.Text
-    $control.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
-    return $control
-}
+    $name = [IO.Path]::GetFileName($Uri.AbsolutePath)
 
-function New-UiButton {
-    param(
-        [string]$Text,
-        [int]$X,
-        [int]$Y,
-        [int]$Width = 130,
-        [int]$Height = 34,
-        [System.Drawing.Color]$Color
-    )
-
-    $control = New-Object System.Windows.Forms.Button
-    $control.Text = $Text
-    $control.Location = New-Object System.Drawing.Point($X, $Y)
-    $control.Size = New-Object System.Drawing.Size($Width, $Height)
-    $control.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-    $control.FlatAppearance.BorderSize = 0
-    $control.BackColor = $Color
-    $control.ForeColor = [System.Drawing.Color]::White
-    $control.Font = $script:Font
-    $control.Cursor = [System.Windows.Forms.Cursors]::Hand
-    return $control
-}
-
-function Set-DownloadState {
-    param(
-        [bool]$Busy,
-        [string]$Status
-    )
-
-    $script:IsDownloading = $Busy
-    $script:StartButton.Enabled = -not $Busy
-    $script:CancelButton.Enabled = $Busy
-    $script:UrlBox.Enabled = -not $Busy
-    $script:DirectoryBox.Enabled = -not $Busy
-    $script:BrowseButton.Enabled = -not $Busy
-    $script:ExtractButton.Enabled = -not $Busy
-    $script:DownloadStatus.Text = $Status
-}
-
-function Get-ArchiveFiles {
-    param([string]$Directory)
-
-    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
-        throw "The target directory does not exist: $Directory"
+    if ([string]::IsNullOrWhiteSpace($name)) {
+        $name = 'download.bin'
     }
 
-    @(
-        Get-ChildItem -LiteralPath $Directory -File |
-            Where-Object {
-                $_.Name -match '(?i)\.(zip|tar|tar\.gz|tgz)$'
-            } |
-            Sort-Object LastWriteTime -Descending
-    )
+    try { $name = [Uri]::UnescapeDataString($name) } catch {}
+
+    $name = $name -replace '[<>:"/\\|?*\x00-\x1F]','_'
+
+    if ([string]::IsNullOrWhiteSpace($name)) {
+        $name = 'download.bin'
+    }
+
+    return $name
 }
 
-# ------------------------- Main Window -------------------------
+function Start-Download {
+    if ($script:DownloadActive) { return }
 
-$script:Form = New-Object System.Windows.Forms.Form
-$script:Form.Text = 'PowerShell Ultimate Hub v1.0'
-$script:Form.StartPosition = 'CenterScreen'
-$script:Form.Size = New-Object System.Drawing.Size(1000, 760)
-$script:Form.MinimumSize = New-Object System.Drawing.Size(850, 650)
-$script:Form.BackColor = $script:Colors.Background
-$script:Form.ForeColor = $script:Colors.Text
-$script:Form.Font = $script:Font
-$script:Form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+    $urlText = $script:UrlBox.Text.Trim()
+    $directoryText = $script:DirectoryBox.Text.Trim()
 
-$header = New-Object System.Windows.Forms.Panel
-$header.Dock = [System.Windows.Forms.DockStyle]::Top
-$header.Height = 76
-$header.BackColor = $script:Colors.Panel
+    try {
+        $uri = $null
 
-$heading = New-Object System.Windows.Forms.Label
-$heading.Text = 'ULTIMATE HUB'
-$heading.Font = New-Object System.Drawing.Font(
-    'Segoe UI', 17, [System.Drawing.FontStyle]::Bold
-)
-$heading.ForeColor = $script:Colors.Text
-$heading.Location = New-Object System.Drawing.Point(22, 10)
-$heading.Size = New-Object System.Drawing.Size(340, 32)
+        if (-not [Uri]::TryCreate($urlText,[UriKind]::Absolute,[ref]$uri)) {
+            throw 'Enter a valid absolute download URL.'
+        }
 
-$subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = 'DOWNLOAD MANAGER  /  ARCHIVE TOOLS  /  PROCESS MONITOR'
-$subtitle.Font = New-Object System.Drawing.Font('Segoe UI', 8)
-$subtitle.ForeColor = $script:Colors.Muted
-$subtitle.Location = New-Object System.Drawing.Point(24, 45)
-$subtitle.Size = New-Object System.Drawing.Size(650, 20)
+        if ($uri.Scheme -notin @('http','https')) {
+            throw 'Only HTTP and HTTPS URLs are supported.'
+        }
 
-$version = New-Object System.Windows.Forms.Label
-$version.Text = 'v1.0'
-$version.ForeColor = $script:Colors.Accent
-$version.Font = $script:FontBold
-$version.AutoSize = $true
-$version.Location = New-Object System.Drawing.Point(900, 28)
-$version.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
-                  [System.Windows.Forms.AnchorStyles]::Right
+        if ([string]::IsNullOrWhiteSpace($directoryText)) {
+            throw 'Choose a destination directory.'
+        }
 
-$header.Controls.AddRange(@($heading, $subtitle, $version))
-$script:Form.Controls.Add($header)
+        $directory = [IO.Path]::GetFullPath(
+            [Environment]::ExpandEnvironmentVariables($directoryText)
+        )
 
-$script:Tabs = New-Object System.Windows.Forms.TabControl
-$script:Tabs.Dock = [System.Windows.Forms.DockStyle]::Fill
-$script:Tabs.Padding = New-Object System.Drawing.Point(16, 7)
-$script:Tabs.Font = $script:Font
+        if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
 
-$downloadTab = New-Object System.Windows.Forms.TabPage
-$downloadTab.Text = 'Downloader & Extractor'
-$downloadTab.BackColor = $script:Colors.Background
-$downloadTab.ForeColor = $script:Colors.Text
+        $fileName = Get-SafeFileName -Uri $uri
+        $destination = Join-Path $directory $fileName
 
-$taskTab = New-Object System.Windows.Forms.TabPage
-$taskTab.Text = 'Mini Task Manager'
-$taskTab.BackColor = $script:Colors.Background
-$taskTab.ForeColor = $script:Colors.Text
+        if (Test-Path -LiteralPath $destination -PathType Leaf) {
+            $answer = [Windows.Forms.MessageBox]::Show(
+                "The file already exists:`r`n$destination`r`n`r`nReplace it?",
+                $script:AppTitle,
+                [Windows.Forms.MessageBoxButtons]::YesNo,
+                [Windows.Forms.MessageBoxIcon]::Question
+            )
 
-[void]$script:Tabs.TabPages.Add($downloadTab)
-[void]$script:Tabs.TabPages.Add($taskTab)
-$script:Form.Controls.Add($script:Tabs)
-$script:Tabs.BringToFront()
+            if ($answer -ne [Windows.Forms.DialogResult]::Yes) { return }
+        }
 
-# ------------------------- Downloader Tab -------------------------
+        $tempPath = Join-Path $directory ('.download-' + [guid]::NewGuid().ToString('N') + '.tmp')
 
-$downloadPanel = New-Object System.Windows.Forms.Panel
-$downloadPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$downloadPanel.AutoScroll = $true
-$downloadPanel.BackColor = $script:Colors.Background
+        # Use HttpWebRequest with redirect support and a streamed response.
+        # This avoids WebClient event/closure issues and handles GitHub redirects.
+        $script:DownloadActive = $true
+        $script:DownloadTempPath = $tempPath
+        $script:DownloadFinalPath = $destination
+        $script:StartDownloadButton.Enabled = $false
+        $script:CancelDownloadButton.Enabled = $true
+        $script:ProgressBar.Value = 0
+        $script:ProgressLabel.Text = 'Connecting...'
+        Set-DownloadStatus 'Connecting to server...' $script:C.Accent
+
+        $script:DownloadCancellation = New-Object Threading.CancellationTokenSource
+        $token = $script:DownloadCancellation.Token
+
+        $script:DownloadClient = [System.Net.Http.HttpClient]::new()
+        $script:DownloadClient.Timeout = [TimeSpan]::FromMinutes(30)
+        $script:DownloadClient.DefaultRequestHeaders.UserAgent.ParseAdd('Mozilla/5.0 PowerShell-Ultimate-Hub/1.0')
+        $script:DownloadClient.DefaultRequestHeaders.Accept.ParseAdd('*/*')
+
+        $client = $script:DownloadClient
+        $progress = $script:ProgressBar
+        $progressLabel = $script:ProgressLabel
+        $statusLabel = $script:DownloadStatus
+        $startButton = $script:StartDownloadButton
+        $cancelButton = $script:CancelDownloadButton
+        $form = $script:MainForm
+        $log = $script:LogBox
+        $extractEnabled = $script:ExtractCheckBox.Checked
+
+        Write-Log "Starting download: $urlText"
+        Write-Log "Destination: $destination"
+
+        $worker = [Action]{
+            $success = $false
+            $errorText = $null
+            $cancelled = $false
+            $downloadedBytes = [long]0
+            $totalBytes = [long]-1
+
+            try {
+                $requestUri = $uri
+                $response = $client.GetAsync(
+                    $requestUri,
+                    [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead,
+                    $token
+                ).GetAwaiter().GetResult()
+
+                try {
+                    $response.EnsureSuccessStatusCode()
+                    $totalBytes = $response.Content.Headers.ContentLength
+
+                    $inputStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+                    $outputStream = [IO.File]::Open(
+                        $tempPath,
+                        [IO.FileMode]::CreateNew,
+                        [IO.FileAccess]::Write,
+                        [IO.FileShare]::None
+                    )
+
+                    try {
+                        $buffer = New-Object byte[] (128KB)
+
+                        while (($read = $inputStream.Read($buffer,0,$buffer.Length)) -gt 0) {
+                            $token.ThrowIfCancellationRequested()
+                            $outputStream.Write($buffer,0,$read)
+                            $downloadedBytes += $read
+
+                            $received = $downloadedBytes
+                            $expected = $totalBytes
+
+                            $form.BeginInvoke([Action]{
+                                if ($progress.IsDisposed) { return }
+
+                                if ($expected -gt 0) {
+                                    $percent = [int][Math]::Min(100,[Math]::Floor(($received * 100.0) / $expected))
+                                    $progress.Value = [Math]::Max(0,[Math]::Min(100,$percent))
+                                    $progressLabel.Text = '{0}%  |  {1} of {2}' -f $percent,(Format-Bytes $received),(Format-Bytes $expected)
+                                } else {
+                                    $progressLabel.Text = (Format-Bytes $received) + ' downloaded'
+                                }
+
+                                $statusLabel.Text = 'Downloading...'
+                                $statusLabel.ForeColor = $script:C.Accent
+                            }) | Out-Null
+                        }
+
+                        $outputStream.Flush()
+                    }
+                    finally {
+                        $outputStream.Dispose()
+                        $inputStream.Dispose()
+                    }
+                }
+                finally {
+                    $response.Dispose()
+                }
+
+                if ($downloadedBytes -le 0) {
+                    throw 'The server returned an empty file.'
+                }
+
+                $success = $true
+            }
+            catch [OperationCanceledException] {
+                $cancelled = $true
+            }
+            catch {
+                $errorText = $_.Exception.Message
+                if ($_.Exception.InnerException) {
+                    $errorText += ' ' + $_.Exception.InnerException.Message
+                }
+            }
+
+            $resultSuccess = $success
+            $resultError = $errorText
+            $resultCancelled = $cancelled
+            $resultBytes = $downloadedBytes
+            $resultTemp = $tempPath
+            $resultDestination = $destination
+            $resultExtract = $extractEnabled
+
+            $form.BeginInvoke([Action]{
+                try {
+                    if ($resultCancelled) {
+                        Set-DownloadStatus 'Download cancelled.' $script:C.Red
+                        $script:ProgressLabel.Text = 'Cancelled'
+                        Write-Log 'Download cancelled.' 'WARNING'
+                    }
+                    elseif (-not $resultSuccess) {
+                        Set-DownloadStatus 'Download failed.' $script:C.Red
+                        $script:ProgressLabel.Text = 'Failed'
+                        Write-Log "Download failed: $resultError" 'ERROR'
+
+                        [Windows.Forms.MessageBox]::Show(
+                            "Download failed:`r`n$resultError",
+                            $script:AppTitle,
+                            [Windows.Forms.MessageBoxButtons]::OK,
+                            [Windows.Forms.MessageBoxIcon]::Error
+                        ) | Out-Null
+                    }
+                    else {
+                        if (Test-Path -LiteralPath $resultDestination -PathType Leaf) {
+                            Remove-Item -LiteralPath $resultDestination -Force
+                        }
+
+                        Move-Item -LiteralPath $resultTemp -Destination $resultDestination -Force
+
+                        $size = Format-Bytes $resultBytes
+                        $script:ProgressBar.Value = 100
+                        $script:ProgressLabel.Text = "100%  |  $size"
+                        Set-DownloadStatus 'Download completed successfully.' $script:C.Green
+                        Write-Log "Download completed: $resultDestination ($size)" 'SUCCESS'
+
+                        if ($resultExtract) {
+                            $lowerPath = $resultDestination.ToLowerInvariant()
+                            $isZip = $lowerPath.EndsWith('.zip')
+                            $isTar = $lowerPath.EndsWith('.tar') -or
+                                     $lowerPath.EndsWith('.tar.gz') -or
+                                     $lowerPath.EndsWith('.tgz')
+
+                            if ($isZip -or $isTar) {
+                                try {
+                                    $folderName = [IO.Path]::GetFileNameWithoutExtension($resultDestination)
+
+                                    if ($lowerPath.EndsWith('.tar.gz')) {
+                                        $folderName = [IO.Path]::GetFileName(
+                                            $resultDestination.Substring(0,$resultDestination.Length - 7)
+                                        )
+                                    }
+
+                                    $extractDir = Join-Path ([IO.Path]::GetDirectoryName($resultDestination)) $folderName
+
+                                    if (-not (Test-Path -LiteralPath $extractDir -PathType Container)) {
+                                        New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+                                    }
+
+                                    if ($isZip) {
+                                        Expand-Archive -LiteralPath $resultDestination -DestinationPath $extractDir -Force
+                                    } else {
+                                        $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
+
+                                        if (-not $tar) {
+                                            throw 'tar.exe is unavailable on this Windows installation.'
+                                        }
+
+                                        $p = Start-Process -FilePath $tar.Source `
+                                            -ArgumentList @('-xf',"`"$resultDestination`"",'-C',"`"$extractDir`"") `
+                                            -Wait -PassThru -NoNewWindow
+
+                                        if ($p.ExitCode -ne 0) {
+                                            throw "tar.exe returned exit code $($p.ExitCode)."
+                                        }
+                                    }
+
+                                    Set-DownloadStatus 'Download and extraction completed.' $script:C.Green
+                                    Write-Log "Extracted archive to $extractDir" 'SUCCESS'
+                                }
+                                catch {
+                                    Set-DownloadStatus 'Downloaded, but extraction failed.' $script:C.Red
+                                    Write-Log "Extraction failed: $($_.Exception.Message)" 'ERROR'
+                                }
+                            }
+                        }
+                    }
+                }
+                catch {
+                    Set-DownloadStatus 'Unable to finalize download.' $script:C.Red
+                    Write-Log "Finalization error: $($_.Exception.Message)" 'ERROR'
+                }
+                finally {
+                    if ($resultTemp -and (Test-Path -LiteralPath $resultTemp -PathType Leaf)) {
+                        Remove-Item -LiteralPath $resultTemp -Force -ErrorAction SilentlyContinue
+                    }
+
+                    if ($null -ne $script:DownloadClient) {
+                        $script:DownloadClient.Dispose()
+                        $script:DownloadClient = $null
+                    }
+
+                    if ($null -ne $script:DownloadCancellation) {
+                        $script:DownloadCancellation.Dispose()
+                        $script:DownloadCancellation = $null
+                    }
+
+                    $script:DownloadActive = $false
+
+                    if (-not $script:MainForm.IsDisposed) {
+                        $script:StartDownloadButton.Enabled = $true
+                        $script:CancelDownloadButton.Enabled = $false
+                    }
+                }
+            }) | Out-Null
+        }
+
+        $task = [System.Threading.Tasks.Task]::Run($worker)
+    }
+    catch {
+        $script:DownloadActive = $false
+        $script:StartDownloadButton.Enabled = $true
+        $script:CancelDownloadButton.Enabled = $false
+        Set-DownloadStatus 'Unable to start download.' $script:C.Red
+        Write-Log "Unable to start download: $($_.Exception.Message)" 'ERROR'
+
+        [Windows.Forms.MessageBox]::Show(
+            $_.Exception.Message,
+            $script:AppTitle,
+            [Windows.Forms.MessageBoxButtons]::OK,
+            [Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+    }
+}
+
+function Refresh-ProcessList {
+    if ($null -eq $script:ProcessList -or $script:ProcessList.IsDisposed) { return }
+
+    $selectedPid = $null
+    if ($script:ProcessList.SelectedItems.Count -gt 0) {
+        $selectedPid = [int]$script:ProcessList.SelectedItems[0].SubItems[1].Text
+    }
+
+    $script:ProcessList.BeginUpdate()
+
+    try {
+        $script:ProcessList.Items.Clear()
+
+        foreach ($p in (Get-Process -ErrorAction SilentlyContinue | Sort-Object ProcessName)) {
+            try {
+                $memory = [Math]::Round($p.WorkingSet64 / 1MB,1)
+                $cpu = if ($null -ne $p.CPU) { [Math]::Round([double]$p.CPU,1) } else { 0 }
+
+                $item = New-Object Windows.Forms.ListViewItem([string]$p.ProcessName)
+                $null = $item.SubItems.Add([string]$p.Id)
+                $null = $item.SubItems.Add("$cpu s")
+                $null = $item.SubItems.Add("$memory MB")
+
+                if ($null -ne $selectedPid -and $p.Id -eq $selectedPid) {
+                    $item.Selected = $true
+                }
+
+                $script:ProcessList.Items.Add($item) | Out-Null
+            } catch {}
+        }
+
+        $script:ProcessCountLabel.Text = "$($script:ProcessList.Items.Count) processes"
+    }
+    finally {
+        $script:ProcessList.EndUpdate()
+    }
+}
+
+function Stop-SelectedProcess {
+    if ($script:ProcessList.SelectedItems.Count -eq 0) {
+        [Windows.Forms.MessageBox]::Show(
+            'Select a process first.',
+            $script:AppTitle,
+            [Windows.Forms.MessageBoxButtons]::OK,
+            [Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+        return
+    }
+
+    $item = $script:ProcessList.SelectedItems[0]
+    $processId = [int]$item.SubItems[1].Text
+    $processName = $item.SubItems[0].Text
+
+    if ($processId -eq $PID) {
+        [Windows.Forms.MessageBox]::Show(
+            'The application cannot terminate its own process.',
+            $script:AppTitle,
+            [Windows.Forms.MessageBoxButtons]::OK,
+            [Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        return
+    }
+
+    $answer = [Windows.Forms.MessageBox]::Show(
+        "End process '$processName' (PID $processId)?`r`nUnsaved work may be lost.",
+        $script:AppTitle,
+        [Windows.Forms.MessageBoxButtons]::YesNo,
+        [Windows.Forms.MessageBoxIcon]::Warning
+    )
+
+    if ($answer -ne [Windows.Forms.DialogResult]::Yes) { return }
+
+    try {
+        Stop-Process -Id $processId -Force -ErrorAction Stop
+        Write-Log "Terminated $processName (PID $processId)." 'WARNING'
+        Refresh-ProcessList
+    }
+    catch {
+        Write-Log "Unable to terminate PID ${processId}: $($_.Exception.Message)" 'ERROR'
+        [Windows.Forms.MessageBox]::Show(
+            $_.Exception.Message,
+            $script:AppTitle,
+            [Windows.Forms.MessageBoxButtons]::OK,
+            [Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+    }
+}
+
+function Open-DownloadDirectory {
+    try {
+        $path = [IO.Path]::GetFullPath(
+            [Environment]::ExpandEnvironmentVariables($script:DirectoryBox.Text.Trim())
+        )
+
+        if (-not (Test-Path -LiteralPath $path -PathType Container)) {
+            New-Item -ItemType Directory -Path $path -Force | Out-Null
+        }
+
+        Start-Process explorer.exe -ArgumentList "`"$path`""
+    }
+    catch {
+        Write-Log "Unable to open directory: $($_.Exception.Message)" 'ERROR'
+    }
+}
+
+# Main form
+$script:MainForm = New-Object Windows.Forms.Form
+$script:MainForm.Text = $script:AppTitle
+$script:MainForm.Size = New-Object Drawing.Size(1120,820)
+$script:MainForm.MinimumSize = New-Object Drawing.Size(1000,740)
+$script:MainForm.StartPosition = [Windows.Forms.FormStartPosition]::CenterScreen
+$script:MainForm.BackColor = $script:C.Background
+$script:MainForm.ForeColor = $script:C.Foreground
+$script:MainForm.Font = New-Object Drawing.Font('Segoe UI',[single]9.5)
+$script:MainForm.AutoScaleMode = [Windows.Forms.AutoScaleMode]::Font
+
+$header = New-Panel 0 0 1100 82
+$header.Dock = [Windows.Forms.DockStyle]::Top
+$script:MainForm.Controls.Add($header)
+
+$logo = New-Label 'PS' 22 16 46 46 17
+$logo.BackColor = $script:C.Accent
+$logo.TextAlign = [Drawing.ContentAlignment]::MiddleCenter
+$logo.Font = New-Object Drawing.Font('Segoe UI Semibold',[single]16)
+$header.Controls.Add($logo)
+
+$appName = New-Label 'PowerShell Ultimate Hub' 82 12 460 32 17
+$appName.Font = New-Object Drawing.Font('Segoe UI Semibold',[single]16)
+$header.Controls.Add($appName)
+
+$header.Controls.Add((New-Label 'DOWNLOAD MANAGER  •  PROCESS MANAGER' 84 43 480 22 8 $script:C.Muted))
+$version = New-Label 'VERSION 1.0' 930 26 125 25 9 $script:C.Muted
+$version.TextAlign = [Drawing.ContentAlignment]::MiddleRight
+$header.Controls.Add($version)
+
+$tabs = New-Object Windows.Forms.TabControl
+$tabs.Dock = [Windows.Forms.DockStyle]::Fill
+$tabs.Font = New-Object Drawing.Font('Segoe UI Semibold',[single]10)
+$tabs.Padding = New-Object Drawing.Point(16,7)
+$tabs.BackColor = $script:C.Background
+$script:MainForm.Controls.Add($tabs)
+$tabs.BringToFront()
+
+$downloadTab = New-Object Windows.Forms.TabPage
+$downloadTab.Text = '  Downloads  '
+$downloadTab.BackColor = $script:C.Background
+$downloadTab.ForeColor = $script:C.Foreground
+$tabs.TabPages.Add($downloadTab)
+
+$processTab = New-Object Windows.Forms.TabPage
+$processTab.Text = '  Task Manager  '
+$processTab.BackColor = $script:C.Background
+$processTab.ForeColor = $script:C.Foreground
+$tabs.TabPages.Add($processTab)
+
+# Download configuration
+$downloadPanel = New-Panel 15 15 1030 270
+$downloadPanel.Anchor = 'Top,Left,Right'
 $downloadTab.Controls.Add($downloadPanel)
 
-$downloadPanel.Controls.Add((New-UiLabel 'Download URL' 22 18 200))
-$script:UrlBox = New-UiTextBox 22 45 760 $script:DefaultUrl
-$script:UrlBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
-                        [System.Windows.Forms.AnchorStyles]::Left -bor
-                        [System.Windows.Forms.AnchorStyles]::Right
+$downloadPanel.Controls.Add((New-Label 'Download a file' 20 14 400 30 14))
+$downloadPanel.Controls.Add((New-Label 'Enter a direct file URL and choose where to save it.' 20 45 700 23 9 $script:C.Muted))
+$downloadPanel.Controls.Add((New-Label 'DOWNLOAD URL' 20 78 150 20 8 $script:C.Muted))
+
+$script:UrlBox = New-TextBox $script:DefaultUrl 20 101 990
+$script:UrlBox.Anchor = 'Top,Left,Right'
 $downloadPanel.Controls.Add($script:UrlBox)
 
-$downloadPanel.Controls.Add((New-UiLabel 'Save Directory' 22 84 200))
-$script:DirectoryBox = New-UiTextBox 22 111 650 (
-    Join-Path $HOME 'Downloads\CoolGame'
-)
-$script:DirectoryBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
-                              [System.Windows.Forms.AnchorStyles]::Left -bor
-                              [System.Windows.Forms.AnchorStyles]::Right
+$downloadPanel.Controls.Add((New-Label 'SAVE DIRECTORY' 20 145 170 20 8 $script:C.Muted))
+$defaultDirectory = Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads'
+$script:DirectoryBox = New-TextBox $defaultDirectory 20 168 760
+$script:DirectoryBox.Anchor = 'Top,Left,Right'
 $downloadPanel.Controls.Add($script:DirectoryBox)
 
-$script:BrowseButton = New-UiButton 'Browse...' 685 109 105 32 $script:Colors.Input
-$script:BrowseButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
-                              [System.Windows.Forms.AnchorStyles]::Right
-$downloadPanel.Controls.Add($script:BrowseButton)
+$browseButton = New-Button 'Browse...' 795 166 110 36 -Secondary
+$browseButton.Anchor = 'Top,Right'
+$downloadPanel.Controls.Add($browseButton)
 
-$script:StartButton = New-UiButton 'Start Download' 22 160 150 38 $script:Colors.Accent
-$script:CancelButton = New-UiButton 'Cancel Download' 182 160 150 38 $script:Colors.Danger
-$script:CancelButton.Enabled = $false
-$script:ExtractButton = New-UiButton 'Extract Archive' 342 160 145 38 $script:Colors.Success
-$script:OpenFolderButton = New-UiButton 'Open Folder' 497 160 125 38 $script:Colors.Input
-$script:ClearLogButton = New-UiButton 'Clear Log' 632 160 100 38 $script:Colors.Input
+$openFolderButton = New-Button 'Open Folder' 914 166 105 36 -Secondary
+$openFolderButton.Anchor = 'Top,Right'
+$downloadPanel.Controls.Add($openFolderButton)
 
-$script:StartButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
-                             [System.Windows.Forms.AnchorStyles]::Left
-$script:CancelButton.Anchor = $script:StartButton.Anchor
-$script:ExtractButton.Anchor = $script:StartButton.Anchor
-$script:OpenFolderButton.Anchor = $script:StartButton.Anchor
-$script:ClearLogButton.Anchor = $script:StartButton.Anchor
+$script:ExtractCheckBox = New-Object Windows.Forms.CheckBox
+$script:ExtractCheckBox.Text = 'Extract ZIP/TAR archives after download'
+$script:ExtractCheckBox.Location = New-Object Drawing.Point(20,213)
+$script:ExtractCheckBox.Size = New-Object Drawing.Size(370,25)
+$script:ExtractCheckBox.Checked = $true
+$script:ExtractCheckBox.ForeColor = $script:C.Foreground
+$script:ExtractCheckBox.BackColor = [Drawing.Color]::Transparent
+$downloadPanel.Controls.Add($script:ExtractCheckBox)
 
-$downloadPanel.Controls.AddRange(@(
-    $script:StartButton,
-    $script:CancelButton,
-    $script:ExtractButton,
-    $script:OpenFolderButton,
-    $script:ClearLogButton
-))
+$script:StartDownloadButton = New-Button 'Start Download' 760 210 140
+$script:StartDownloadButton.Anchor = 'Top,Right'
+$downloadPanel.Controls.Add($script:StartDownloadButton)
 
-$script:DownloadStatus = New-UiLabel 'Ready' 22 211 700 24
-$script:DownloadStatus.ForeColor = $script:Colors.Muted
-$downloadPanel.Controls.Add($script:DownloadStatus)
+$script:CancelDownloadButton = New-Button 'Cancel' 910 210 110 -Secondary
+$script:CancelDownloadButton.Anchor = 'Top,Right'
+$script:CancelDownloadButton.Enabled = $false
+$downloadPanel.Controls.Add($script:CancelDownloadButton)
 
-$script:ProgressBar = New-Object System.Windows.Forms.ProgressBar
-$script:ProgressBar.Location = New-Object System.Drawing.Point(22, 240)
-$script:ProgressBar.Size = New-Object System.Drawing.Size(760, 24)
+# Progress display
+$progressPanel = New-Panel 15 300 1030 118
+$progressPanel.Anchor = 'Top,Left,Right'
+$downloadTab.Controls.Add($progressPanel)
+
+$progressPanel.Controls.Add((New-Label 'Download progress' 20 12 300 25 12))
+$script:DownloadStatus = New-Label 'Ready to download' 20 43 700 23 9 $script:C.Muted
+$progressPanel.Controls.Add($script:DownloadStatus)
+
+$script:ProgressLabel = New-Label '0%' 760 43 250 23 9 $script:C.Muted
+$script:ProgressLabel.TextAlign = [Drawing.ContentAlignment]::MiddleRight
+$progressPanel.Controls.Add($script:ProgressLabel)
+
+$script:ProgressBar = New-Object Windows.Forms.ProgressBar
+$script:ProgressBar.Location = New-Object Drawing.Point(20,74)
+$script:ProgressBar.Size = New-Object Drawing.Size(990,23)
+$script:ProgressBar.Anchor = 'Top,Left,Right'
 $script:ProgressBar.Minimum = 0
 $script:ProgressBar.Maximum = 100
-$script:ProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
-$script:ProgressBar.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
-                             [System.Windows.Forms.AnchorStyles]::Left -bor
-                             [System.Windows.Forms.AnchorStyles]::Right
-$downloadPanel.Controls.Add($script:ProgressBar)
+$script:ProgressBar.Style = [Windows.Forms.ProgressBarStyle]::Continuous
+$progressPanel.Controls.Add($script:ProgressBar)
 
-$script:BytesLabel = New-UiLabel 'Downloaded: 0 B / Unknown' 22 270 500 23
-$downloadPanel.Controls.Add($script:BytesLabel)
+# Activity log
+$logPanel = New-Panel 15 430 1030 260
+$logPanel.Anchor = 'Top,Bottom,Left,Right'
+$downloadTab.Controls.Add($logPanel)
 
-$script:PercentLabel = New-UiLabel '0%' 710 270 72 23
-$script:PercentLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-$script:PercentLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
-                              [System.Windows.Forms.AnchorStyles]::Right
-$downloadPanel.Controls.Add($script:PercentLabel)
+$logPanel.Controls.Add((New-Label 'Activity log' 20 12 300 26 12))
+$clearLogButton = New-Button 'Clear Log' 915 9 95 30 -Secondary
+$clearLogButton.Anchor = 'Top,Right'
+$logPanel.Controls.Add($clearLogButton)
 
-$downloadPanel.Controls.Add((New-UiLabel 'LIVE ACTIVITY LOG' 22 308 250 24))
-
-$script:LogBox = New-Object System.Windows.Forms.RichTextBox
-$script:LogBox.Location = New-Object System.Drawing.Point(22, 336)
-$script:LogBox.Size = New-Object System.Drawing.Size(760, 235)
+$script:LogBox = New-Object Windows.Forms.RichTextBox
+$script:LogBox.Location = New-Object Drawing.Point(20,44)
+$script:LogBox.Size = New-Object Drawing.Size(990,195)
+$script:LogBox.Anchor = 'Top,Bottom,Left,Right'
+$script:LogBox.BackColor = $script:C.Background
+$script:LogBox.ForeColor = $script:C.Foreground
+$script:LogBox.BorderStyle = [Windows.Forms.BorderStyle]::None
 $script:LogBox.ReadOnly = $true
-$script:LogBox.BackColor = [System.Drawing.Color]::FromArgb(18, 20, 25)
-$script:LogBox.ForeColor = $script:Colors.Text
-$script:LogBox.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
-$script:LogBox.Font = New-Object System.Drawing.Font('Consolas', 9)
-$script:LogBox.DetectUrls = $true
-$script:LogBox.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
-                        [System.Windows.Forms.AnchorStyles]::Bottom -bor
-                        [System.Windows.Forms.AnchorStyles]::Left -bor
-                        [System.Windows.Forms.AnchorStyles]::Right
-$downloadPanel.Controls.Add($script:LogBox)
+$script:LogBox.DetectUrls = $false
+$script:LogBox.Font = New-Object Drawing.Font('Consolas',[single]9)
+$logPanel.Controls.Add($script:LogBox)
 
-$script:ArchiveHint = New-UiLabel (
-    'Supported formats: ZIP, TAR, TAR.GZ and TGZ. Extraction uses built-in Windows tools where available.'
-) 22 578 760 42
-$script:ArchiveHint.ForeColor = $script:Colors.Muted
-$script:ArchiveHint.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor
-                              [System.Windows.Forms.AnchorStyles]::Left -bor
-                              [System.Windows.Forms.AnchorStyles]::Right
-$downloadPanel.Controls.Add($script:ArchiveHint)
+# Task manager
+$processPanel = New-Panel 15 15 1030 660
+$processPanel.Anchor = 'Top,Bottom,Left,Right'
+$processTab.Controls.Add($processPanel)
 
-# ------------------------- Task Manager Tab -------------------------
+$processPanel.Controls.Add((New-Label 'Running processes' 20 14 400 30 14))
+$processPanel.Controls.Add((New-Label 'Inspect running processes, processor time and memory usage.' 20 44 850 24 9 $script:C.Muted))
 
-$taskPanel = New-Object System.Windows.Forms.Panel
-$taskPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$taskPanel.BackColor = $script:Colors.Background
-$taskTab.Controls.Add($taskPanel)
+$script:ProcessCountLabel = New-Label '0 processes' 800 14 210 26 9 $script:C.Muted
+$script:ProcessCountLabel.TextAlign = [Drawing.ContentAlignment]::MiddleRight
+$processPanel.Controls.Add($script:ProcessCountLabel)
 
-$taskPanel.Controls.Add((New-UiLabel 'RUNNING PROCESSES' 18 14 280 26))
-
-$script:ProcessSummary = New-UiLabel 'Refresh to load process information.' 18 42 720 24
-$script:ProcessSummary.ForeColor = $script:Colors.Muted
-$taskPanel.Controls.Add($script:ProcessSummary)
-
-$script:ProcessList = New-Object System.Windows.Forms.ListView
-$script:ProcessList.Location = New-Object System.Drawing.Point(18, 75)
-$script:ProcessList.Size = New-Object System.Drawing.Size(920, 470)
-$script:ProcessList.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
-                             [System.Windows.Forms.AnchorStyles]::Bottom -bor
-                             [System.Windows.Forms.AnchorStyles]::Left -bor
-                             [System.Windows.Forms.AnchorStyles]::Right
-$script:ProcessList.View = [System.Windows.Forms.View]::Details
+$script:ProcessList = New-Object Windows.Forms.ListView
+$script:ProcessList.Location = New-Object Drawing.Point(20,80)
+$script:ProcessList.Size = New-Object Drawing.Size(990,510)
+$script:ProcessList.Anchor = 'Top,Bottom,Left,Right'
+$script:ProcessList.View = [Windows.Forms.View]::Details
 $script:ProcessList.FullRowSelect = $true
 $script:ProcessList.GridLines = $true
 $script:ProcessList.MultiSelect = $false
 $script:ProcessList.HideSelection = $false
-$script:ProcessList.BackColor = $script:Colors.Panel
-$script:ProcessList.ForeColor = $script:Colors.Text
-$script:ProcessList.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+$script:ProcessList.BackColor = $script:C.Input
+$script:ProcessList.ForeColor = $script:C.Foreground
+$script:ProcessList.BorderStyle = [Windows.Forms.BorderStyle]::FixedSingle
+$script:ProcessList.Font = New-Object Drawing.Font('Segoe UI',[single]9.5)
+$null = $script:ProcessList.Columns.Add('Process name',470)
+$null = $script:ProcessList.Columns.Add('PID',110)
+$null = $script:ProcessList.Columns.Add('CPU time',170)
+$null = $script:ProcessList.Columns.Add('Memory',190)
+$processPanel.Controls.Add($script:ProcessList)
 
-[void]$script:ProcessList.Columns.Add('Process Name', 280)
-[void]$script:ProcessList.Columns.Add('PID', 90)
-[void]$script:ProcessList.Columns.Add('CPU (s)', 150)
-[void]$script:ProcessList.Columns.Add('Memory (MB)', 150)
+$refreshButton = New-Button 'Refresh Processes' 20 605 160
+$refreshButton.Anchor = 'Bottom,Left'
+$processPanel.Controls.Add($refreshButton)
 
-$taskPanel.Controls.Add($script:ProcessList)
+$endTaskButton = New-Button 'End Task' 190 605 120
+$endTaskButton.Anchor = 'Bottom,Left'
+$endTaskButton.BackColor = $script:C.Red
+$processPanel.Controls.Add($endTaskButton)
 
-$script:RefreshButton = New-UiButton 'Refresh Processes' 18 565 160 38 $script:Colors.Accent
-$script:EndTaskButton = New-UiButton 'End Selected Task' 190 565 160 38 $script:Colors.Danger
-$script:EndTaskButton.Enabled = $false
-$script:ProcessCountLabel = New-UiLabel '0 processes' 370 570 300 28
-$script:ProcessCountLabel.ForeColor = $script:Colors.Muted
+$autoRefreshCheckBox = New-Object Windows.Forms.CheckBox
+$autoRefreshCheckBox.Text = 'Auto-refresh every 5 seconds'
+$autoRefreshCheckBox.Location = New-Object Drawing.Point(330,611)
+$autoRefreshCheckBox.Size = New-Object Drawing.Size(250,24)
+$autoRefreshCheckBox.ForeColor = $script:C.Muted
+$autoRefreshCheckBox.BackColor = [Drawing.Color]::Transparent
+$autoRefreshCheckBox.Checked = $true
+$processPanel.Controls.Add($autoRefreshCheckBox)
 
-$script:RefreshButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor
-                               [System.Windows.Forms.AnchorStyles]::Left
-$script:EndTaskButton.Anchor = $script:RefreshButton.Anchor
-$script:ProcessCountLabel.Anchor = $script:RefreshButton.Anchor
+# UI events
+$browseButton.Add_Click({
+    $dialog = New-Object Windows.Forms.FolderBrowserDialog
+    $dialog.Description = 'Choose the download destination'
+    $dialog.ShowNewFolderButton = $true
 
-$taskPanel.Controls.AddRange(@(
-    $script:RefreshButton,
-    $script:EndTaskButton,
-    $script:ProcessCountLabel
-))
-
-# ------------------------- Process Manager -------------------------
-
-function Refresh-ProcessList {
-    if ($script:ProcessRefreshBusy -or $script:Form.IsDisposed) {
-        return
+    if (Test-Path -LiteralPath $script:DirectoryBox.Text -PathType Container) {
+        $dialog.SelectedPath = $script:DirectoryBox.Text
     }
 
-    $script:ProcessRefreshBusy = $true
-
-    try {
-        $script:ProcessList.BeginUpdate()
-        $script:ProcessList.Items.Clear()
-
-        $processes = @(
-            Get-Process -ErrorAction SilentlyContinue |
-                Sort-Object WorkingSet64 -Descending |
-                Select-Object -First 100
-        )
-
-        foreach ($process in $processes) {
-            $cpu = 'N/A'
-
-            if ($null -ne $process.CPU) {
-                $cpu = '{0:N1}' -f $process.CPU
-            }
-
-            $memory = '{0:N1}' -f ($process.WorkingSet64 / 1MB)
-            $item = New-Object System.Windows.Forms.ListViewItem($process.ProcessName)
-            [void]$item.SubItems.Add([string]$process.Id)
-            [void]$item.SubItems.Add($cpu)
-            [void]$item.SubItems.Add($memory)
-            $item.Tag = [int]$process.Id
-
-            [void]$script:ProcessList.Items.Add($item)
-        }
-
-        $script:ProcessCountLabel.Text = "$($processes.Count) processes displayed"
-        $script:ProcessSummary.Text = 'Sorted by memory usage. Some system processes require administrator privileges.'
+    if ($dialog.ShowDialog($script:MainForm) -eq [Windows.Forms.DialogResult]::OK) {
+        $script:DirectoryBox.Text = $dialog.SelectedPath
     }
-    catch {
-        Show-Error "Could not refresh processes: $($_.Exception.Message)"
-    }
-    finally {
-        $script:ProcessList.EndUpdate()
-        $script:ProcessRefreshBusy = $false
-    }
-}
 
-$script:ProcessList.Add_SelectedIndexChanged({
-    $script:EndTaskButton.Enabled = ($script:ProcessList.SelectedItems.Count -gt 0)
+    $dialog.Dispose()
 })
 
-$script:RefreshButton.Add_Click({
-    try {
-        Refresh-ProcessList
-    }
-    catch {
-        Show-Error $_.Exception.Message
-    }
-})
+$openFolderButton.Add_Click({ Open-DownloadDirectory })
+$script:StartDownloadButton.Add_Click({ Start-Download })
 
-$script:EndTaskButton.Add_Click({
-    try {
-        if ($script:ProcessList.SelectedItems.Count -eq 0) {
-            return
-        }
-
-        $item = $script:ProcessList.SelectedItems[0]
-        $processId = [int]$item.Tag
-        $processName = $item.Text
-
-        if ($processId -eq $PID) {
-            Show-Error 'For safety, this application will not terminate itself.'
-            return
-        }
-
-        $answer = [System.Windows.Forms.MessageBox]::Show(
-            $script:Form,
-            "Terminate process '$processName' (PID $processId)?`r`nUnsaved work in that process may be lost.",
-            'Confirm End Task',
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Warning
-        )
-
-        if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
-            return
-        }
-
-        $process = Get-Process -Id $processId -ErrorAction Stop
-        Stop-Process -InputObject $process -Force -ErrorAction Stop
-
-        [void][System.Windows.Forms.MessageBox]::Show(
-            $script:Form,
-            "Process $processName (PID $processId) was terminated.",
-            'End Task',
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Information
-        )
-
-        Refresh-ProcessList
-    }
-    catch {
-        Show-Error (
-            "Could not terminate the selected process.`r`n" +
-            'It may have exited already or require administrator privileges.' +
-            "`r`n`r`nDetails: $($_.Exception.Message)"
-        )
-    }
-})
-
-$script:Tabs.Add_SelectedIndexChanged({
-    if ($script:Tabs.SelectedTab -eq $taskTab) {
-        Refresh-ProcessList
-    }
-})
-
-# ------------------------- Download Manager -------------------------
-
-$script:BrowseButton.Add_Click({
-    try {
-        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-        $dialog.Description = 'Choose where downloads should be saved.'
-        $dialog.ShowNewFolderButton = $true
-
-        if (Test-Path -LiteralPath $script:DirectoryBox.Text -PathType Container) {
-            $dialog.SelectedPath = $script:DirectoryBox.Text
-        }
-
-        if ($dialog.ShowDialog($script:Form) -eq [System.Windows.Forms.DialogResult]::OK) {
-            $script:DirectoryBox.Text = $dialog.SelectedPath
-        }
-    }
-    catch {
-        Show-Error "Could not open folder browser: $($_.Exception.Message)"
-    }
-})
-
-$script:OpenFolderButton.Add_Click({
-    try {
-        $directory = $script:DirectoryBox.Text.Trim()
-
-        if ([string]::IsNullOrWhiteSpace($directory)) {
-            throw 'Enter a target directory first.'
-        }
-
-        if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
-            New-Item -ItemType Directory -Path $directory -Force | Out-Null
-        }
-
-        Start-Process explorer.exe -ArgumentList "`"$directory`""
-    }
-    catch {
-        Show-Error "Could not open directory: $($_.Exception.Message)"
-    }
-})
-
-$script:ClearLogButton.Add_Click({
-    $script:LogBox.Clear()
-    Write-Log 'Activity log cleared.'
-})
-
-$script:StartButton.Add_Click({
-    try {
-        if ($script:IsDownloading) {
-            return
-        }
-
-        $url = $script:UrlBox.Text.Trim()
-        $directory = $script:DirectoryBox.Text.Trim()
-
-        $uri = $null
-        if (-not [Uri]::TryCreate(
-            $url,
-            [System.UriKind]::Absolute,
-            [ref]$uri
-        )) {
-            throw 'Enter a valid absolute download URL.'
-        }
-
-        if ($uri.Scheme -notin @('http', 'https')) {
-            throw 'Only HTTP and HTTPS download URLs are supported.'
-        }
-
-        if ([string]::IsNullOrWhiteSpace($directory)) {
-            throw 'Choose a target save directory.'
-        }
-
-        $directory = [System.IO.Path]::GetFullPath($directory)
-
-        if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
-            New-Item -ItemType Directory -Path $directory -Force | Out-Null
-        }
-
-        $fileName = [System.IO.Path]::GetFileName($uri.AbsolutePath)
-
-        if ([string]::IsNullOrWhiteSpace($fileName)) {
-            $fileName = 'download.bin'
-        }
-
-        if ($fileName -notmatch '(?i)\.(zip|tar|tar\.gz|tgz)$') {
-            $fileName = "$fileName"
-        }
-
-        $destination = Join-Path $directory $fileName
-
-        if (Test-Path -LiteralPath $destination) {
-            $overwrite = [System.Windows.Forms.MessageBox]::Show(
-                $script:Form,
-                "The file already exists:`r`n$destination`r`n`r`nOverwrite it?",
-                'Confirm Overwrite',
-                [System.Windows.Forms.MessageBoxButtons]::YesNo,
-                [System.Windows.Forms.MessageBoxIcon]::Question
-            )
-
-            if ($overwrite -ne [System.Windows.Forms.DialogResult]::Yes) {
-                return
-            }
-        }
-
-        $script:DownloadedFile = $destination
-        $script:ProgressBar.Value = 0
-        $script:PercentLabel.Text = '0%'
-        $script:BytesLabel.Text = 'Downloaded: 0 B / Unknown'
-        $script:DownloadStarted = Get-Date
-
-        Set-DownloadState -Busy $true -Status 'Connecting...'
-        Write-Log "Starting download: $url"
-        Write-Log "Destination: $destination"
-
-        $script:DownloadCancellation = New-Object System.Threading.CancellationTokenSource
-
-        # Run the transfer on a background task so the WinForms UI remains responsive.
-        $script:DownloadTask = [System.Threading.Tasks.Task]::Run(
-            [System.Action]{
-                $client = $null
-                $stream = $null
-                $output = $null
-
-                try {
-                    $handler = New-Object System.Net.Http.HttpClientHandler
-                    $handler.AllowAutoRedirect = $true
-
-                    $client = New-Object System.Net.Http.HttpClient($handler)
-                    $client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
-                    $client.DefaultRequestHeaders.UserAgent.ParseAdd(
-                        'PowerShell-Ultimate-Hub/1.0'
-                    )
-
-                    $response = $client.GetAsync(
-                        $uri,
-                        [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead,
-                        $script:DownloadCancellation.Token
-                    ).GetAwaiter().GetResult()
-
-                    try {
-                        $response.EnsureSuccessStatusCode()
-
-                        $total = $response.Content.Headers.ContentLength
-                        $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-                        $output = [System.IO.File]::Open(
-                            $destination,
-                            [System.IO.FileMode]::Create,
-                            [System.IO.FileAccess]::Write,
-                            [System.IO.FileShare]::None
-                        )
-
-                        $buffer = New-Object byte[] (65536)
-                        [long]$received = 0
-
-                        while (($read = $stream.Read(
-                            $buffer,
-                            0,
-                            $buffer.Length
-                        )) -gt 0) {
-                            $script:DownloadCancellation.Token.ThrowIfCancellationRequested()
-                            $output.Write($buffer, 0, $read)
-                            $received += $read
-
-                            $percent = 0
-                            if ($null -ne $total -and $total -gt 0) {
-                                $percent = [int][Math]::Min(
-                                    100,
-                                    [Math]::Floor(($received * 100.0) / $total)
-                                )
-                            }
-
-                            $receivedSnapshot = $received
-                            $totalSnapshot = if ($null -ne $total) { [long]$total } else { -1L }
-                            $percentSnapshot = $percent
-
-                            $script:Form.BeginInvoke([Action]{
-                                if ($script:Form.IsDisposed) { return }
-
-                                if ($percentSnapshot -ge 0) {
-                                    $script:ProgressBar.Value = [Math]::Max(
-                                        0,
-                                        [Math]::Min(100, $percentSnapshot)
-                                    )
-                                }
-
-                                $totalText = if ($totalSnapshot -ge 0) {
-                                    Format-Bytes $totalSnapshot
-                                } else {
-                                    'Unknown'
-                                }
-
-                                $script:BytesLabel.Text = 'Downloaded: {0} / {1}' -f (
-                                    (Format-Bytes $receivedSnapshot),
-                                    $totalText
-                                )
-
-                                $script:PercentLabel.Text = if ($totalSnapshot -gt 0) {
-                                    "$percentSnapshot%"
-                                } else {
-                                    (Format-Bytes $receivedSnapshot)
-                                }
-
-                                $script:DownloadStatus.Text = 'Downloading...'
-                            }) | Out-Null
-                        }
-
-                        $output.Flush()
-                    }
-                    finally {
-                        if ($null -ne $output) { $output.Dispose() }
-                        if ($null -ne $stream) { $stream.Dispose() }
-                        $response.Dispose()
-                    }
-
-                    $script:Form.BeginInvoke([Action]{
-                        if ($script:Form.IsDisposed) { return }
-
-                        $script:ProgressBar.Value = 100
-                        $script:PercentLabel.Text = '100%'
-                        Set-DownloadState -Busy $false -Status 'Download complete'
-                        Write-Log "Download completed: $destination" 'OK'
-                        Write-Log 'You can now extract the downloaded archive.'
-                    }) | Out-Null
-                }
-                catch {
-                    $message = $_.Exception.GetBaseException().Message
-                    $wasCancelled = $script:DownloadCancellation.IsCancellationRequested
-
-                    $script:Form.BeginInvoke([Action]{
-                        if ($script:Form.IsDisposed) { return }
-
-                        Set-DownloadState -Busy $false -Status (
-                            if ($wasCancelled) { 'Download cancelled' } else { 'Download failed' }
-                        )
-
-                        if ($wasCancelled) {
-                            Write-Log 'Download cancelled by user.' 'WARN'
-                        }
-                        else {
-                            Write-Log "Download failed: $message" 'ERROR'
-                            Show-Error "Download failed:`r`n$message"
-                        }
-                    }) | Out-Null
-                }
-                finally {
-                    if ($null -ne $client) { $client.Dispose() }
-                }
-            }
-        )
-    }
-    catch {
-        Set-DownloadState -Busy $false -Status 'Ready'
-        Write-Log $_.Exception.Message 'ERROR'
-        Show-Error $_.Exception.Message
-    }
-})
-
-$script:CancelButton.Add_Click({
-    try {
-        if ($null -ne $script:DownloadCancellation -and $script:IsDownloading) {
+$script:CancelDownloadButton.Add_Click({
+    if ($script:DownloadActive -and $null -ne $script:DownloadCancellation) {
+        try {
             $script:DownloadCancellation.Cancel()
-            $script:DownloadStatus.Text = 'Cancelling...'
-            Write-Log 'Cancellation requested.' 'WARN'
-        }
-    }
-    catch {
-        Show-Error "Could not cancel the download: $($_.Exception.Message)"
+            Set-DownloadStatus 'Cancellation requested...' $script:C.Red
+            Write-Log 'Cancellation requested.' 'WARNING'
+            $script:CancelDownloadButton.Enabled = $false
+        } catch {}
     }
 })
 
-# ------------------------- Archive Extractor -------------------------
+$clearLogButton.Add_Click({ $script:LogBox.Clear() })
+$refreshButton.Add_Click({ Refresh-ProcessList })
+$endTaskButton.Add_Click({ Stop-SelectedProcess })
+$script:ProcessList.Add_DoubleClick({ Stop-SelectedProcess })
 
-$script:ExtractButton.Add_Click({
-    try {
-        if ($script:IsDownloading) {
-            throw 'Wait for the current download to finish before extracting.'
-        }
-
-        $directory = $script:DirectoryBox.Text.Trim()
-
-        if ([string]::IsNullOrWhiteSpace($directory)) {
-            throw 'Choose a target directory first.'
-        }
-
-        $archives = @(Get-ArchiveFiles -Directory $directory)
-
-        if ($archives.Count -eq 0) {
-            throw 'No ZIP, TAR, TAR.GZ or TGZ archives were found in the target directory.'
-        }
-
-        $selectedArchive = $null
-
-        if ($archives.Count -eq 1) {
-            $selectedArchive = $archives[0]
-        }
-        else {
-            $picker = New-Object System.Windows.Forms.Form
-            $picker.Text = 'Choose Archive'
-            $picker.Size = New-Object System.Drawing.Size(550, 180)
-            $picker.StartPosition = 'CenterParent'
-            $picker.BackColor = $script:Colors.Background
-            $picker.ForeColor = $script:Colors.Text
-            $picker.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
-            $picker.MaximizeBox = $false
-            $picker.MinimizeBox = $false
-
-            $combo = New-Object System.Windows.Forms.ComboBox
-            $combo.Location = New-Object System.Drawing.Point(16, 20)
-            $combo.Size = New-Object System.Drawing.Size(500, 30)
-            $combo.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
-            $combo.BackColor = $script:Colors.Input
-            $combo.ForeColor = $script:Colors.Text
-
-            foreach ($archive in $archives) {
-                [void]$combo.Items.Add($archive.Name)
-            }
-
-            $combo.SelectedIndex = 0
-
-            $choose = New-UiButton 'Extract Selected' 16 70 150 35 $script:Colors.Success
-            $cancel = New-UiButton 'Cancel' 180 70 100 35 $script:Colors.Input
-            $choose.DialogResult = [System.Windows.Forms.DialogResult]::OK
-            $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-
-            $picker.Controls.AddRange(@($combo, $choose, $cancel))
-            $picker.AcceptButton = $choose
-            $picker.CancelButton = $cancel
-
-            if ($picker.ShowDialog($script:Form) -ne [System.Windows.Forms.DialogResult]::OK) {
-                $picker.Dispose()
-                return
-            }
-
-            $selectedArchive = $archives[$combo.SelectedIndex]
-            $picker.Dispose()
-        }
-
-        $name = $selectedArchive.Name
-        $extractName = $name -replace '(?i)\.tar\.gz$', ''
-        $extractName = $extractName -replace '(?i)\.tgz$', ''
-        $extractName = $extractName -replace '(?i)\.zip$', ''
-        $extractName = $extractName -replace '(?i)\.tar$', ''
-
-        if ([string]::IsNullOrWhiteSpace($extractName)) {
-            $extractName = 'Extracted'
-        }
-
-        $destination = Join-Path $directory $extractName
-        $destination = [System.IO.Path]::GetFullPath($destination)
-        $baseDirectory = [System.IO.Path]::GetFullPath($directory)
-
-        if (-not $destination.StartsWith(
-            $baseDirectory.TrimEnd('\') + '\',
-            [System.StringComparison]::OrdinalIgnoreCase
-        )) {
-            throw 'Invalid extraction destination.'
-        }
-
-        if (Test-Path -LiteralPath $destination) {
-            $confirm = [System.Windows.Forms.MessageBox]::Show(
-                $script:Form,
-                "The extraction folder already exists:`r`n$destination`r`n`r`nFiles may be overwritten. Continue?",
-                'Confirm Extraction',
-                [System.Windows.Forms.MessageBoxButtons]::YesNo,
-                [System.Windows.Forms.MessageBoxIcon]::Warning
-            )
-
-            if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) {
-                return
-            }
-        }
-        else {
-            New-Item -ItemType Directory -Path $destination -Force | Out-Null
-        }
-
-        Write-Log "Extracting $name to $destination"
-
-        if ($name -match '(?i)\.zip$') {
-            Expand-Archive -LiteralPath $selectedArchive.FullName `
-                -DestinationPath $destination -Force -ErrorAction Stop
-        }
-        elseif ($name -match '(?i)\.(tar\.gz|tgz|tar)$') {
-            $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
-
-            if ($null -eq $tar) {
-                throw 'TAR extraction requires tar.exe, available on supported modern Windows versions.'
-            }
-
-            $tarArgs = @('-xf', $selectedArchive.FullName, '-C', $destination)
-            $process = Start-Process -FilePath $tar.Source `
-                -ArgumentList $tarArgs `
-                -Wait -PassThru -NoNewWindow
-
-            if ($process.ExitCode -ne 0) {
-                throw "tar.exe returned exit code $($process.ExitCode). The archive may be invalid or unsupported."
-            }
-        }
-        else {
-            throw 'Unsupported archive format.'
-        }
-
-        Write-Log "Extraction completed: $destination" 'OK'
-        $script:DownloadStatus.Text = 'Extraction complete'
-
-        [void][System.Windows.Forms.MessageBox]::Show(
-            $script:Form,
-            "Archive extracted successfully.`r`n`r`n$destination",
-            'Extraction Complete',
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Information
-        )
-    }
-    catch {
-        Write-Log "Extraction failed: $($_.Exception.Message)" 'ERROR'
-        Show-Error "Extraction failed:`r`n$($_.Exception.Message)"
+$timer = New-Object Windows.Forms.Timer
+$timer.Interval = 5000
+$timer.Add_Tick({
+    if ($autoRefreshCheckBox.Checked -and $tabs.SelectedTab -eq $processTab) {
+        Refresh-ProcessList
     }
 })
+$timer.Start()
 
-# ------------------------- Lifecycle -------------------------
-
-$script:Form.Add_Shown({
-    Write-Log 'PowerShell Ultimate Hub initialized.' 'OK'
-    Write-Log 'Enter a URL, choose a save directory, and select Start Download.'
-    Write-Log 'Downloads run in the background; process termination may require administrator rights.'
+$script:MainForm.Add_Shown({
+    Write-Log 'PowerShell Ultimate Hub initialized.' 'SUCCESS'
+    Write-Log 'Download requests follow HTTP redirects, including GitHub release/archive redirects.'
+    Write-Log 'Choose a URL and destination, then select Start Download.'
+    Refresh-ProcessList
 })
 
-$script:Form.Add_FormClosing({
-    param($sender, $eventArgs)
+$script:MainForm.Add_FormClosing({
+    param($sender,$eventArgs)
 
-    if ($script:IsDownloading) {
-        $answer = [System.Windows.Forms.MessageBox]::Show(
-            $script:Form,
-            'A download is still running. Cancel the download and close the application?',
-            'Download in Progress',
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Warning
+    if ($script:DownloadActive) {
+        $answer = [Windows.Forms.MessageBox]::Show(
+            'A download is running. Cancel it and close the application?',
+            $script:AppTitle,
+            [Windows.Forms.MessageBoxButtons]::YesNo,
+            [Windows.Forms.MessageBoxIcon]::Warning
         )
 
-        if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
+        if ($answer -ne [Windows.Forms.DialogResult]::Yes) {
             $eventArgs.Cancel = $true
             return
         }
 
         if ($null -ne $script:DownloadCancellation) {
-            $script:DownloadCancellation.Cancel()
+            try { $script:DownloadCancellation.Cancel() } catch {}
         }
+    }
+
+    $timer.Stop()
+    $timer.Dispose()
+
+    if ($null -ne $script:DownloadClient) {
+        $script:DownloadClient.Dispose()
     }
 })
 
-try {
-    [void]$script:Form.ShowDialog()
-}
-catch {
-    [void][System.Windows.Forms.MessageBox]::Show(
-        "The application encountered an unexpected error:`r`n$($_.Exception.Message)",
-        'PowerShell Ultimate Hub',
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Error
-    )
-}
-finally {
-    if ($null -ne $script:DownloadCancellation) {
-        try { $script:DownloadCancellation.Dispose() } catch {}
-    }
-
-    if ($null -ne $script:Form -and -not $script:Form.IsDisposed) {
-        $script:Form.Dispose()
-    }
-}
+[void]$script:MainForm.ShowDialog()
