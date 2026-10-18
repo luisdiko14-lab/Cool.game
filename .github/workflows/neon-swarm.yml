@@ -1,11 +1,17 @@
 name: Neon Swarm
 
-# One workflow run = one chain of legs.
-#   * Each leg is a matrix job with max-parallel: 1, so legs run back-to-back inside this run.
-#   * A leg runs SWARM_MINUTES (GitHub caps a job at 6 h). The next leg starts when it ends.
-#   * Inside a leg, crashes, hangs and memory blow-ups restart the game, and pushes hot-reload it.
+# ONE FILE. Nothing else is needed in the repo except neon_swarm.py.
+# The helper scripts (supervisor, tunnel, waking page) are written out by the
+# "Write helper scripts" step below, so there are no files that can go missing.
+#
+#   * One workflow run chains many "legs" (matrix jobs, max-parallel 1) back to back.
+#   * A leg plays for SWARM_MINUTES (GitHub caps a job at 6 h), then the next leg starts.
+#   * Inside a leg: crashes, hangs and memory blow-ups restart the game, and pushes hot-reload it.
 #   * GitHub ends every run after 35 days, so the last leg hands off to one fresh run.
-# Helper files live in .github/neon/ (supervise.sh, tunnel.sh, waking.html).
+#
+# Fixed link (same every leg, every restart): add secret NGROK_AUTHTOKEN and variable NGROK_DOMAIN.
+# Without them you get a random trycloudflare.com link that changes each leg.
+# Phone alerts: add secret NTFY_TOPIC and subscribe to it in the ntfy app.
 
 on:
   workflow_dispatch:
@@ -15,9 +21,9 @@ on:
         type: boolean
         default: false
       legs:
-        description: "Legs to chain (about 5.6 h each; 140 is about 33 days)"
+        description: "Legs to chain (about 5.7 h each; 130 is about 31 days)"
         type: number
-        default: 200
+        default: 130
   # Sent by the last leg to start the next chain at GitHub's 35-day run limit.
   repository_dispatch:
     types: [neon-swarm-handoff]
@@ -64,14 +70,14 @@ jobs:
       - name: Validate the project and build the leg matrix
         id: plan
         env:
-          LEGS_INPUT: ${{ github.event.inputs.legs || '140' }}
+          LEGS_INPUT: ${{ github.event.inputs.legs || '130' }}
         run: |
           set -euo pipefail
           test -f neon_swarm.py || { echo "::error::neon_swarm.py is missing from the repo root"; exit 1; }
           python -m py_compile neon_swarm.py
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os
-          legs = int(os.environ["LEGS_INPUT"])
+          legs = int(float(os.environ["LEGS_INPUT"]))
           if not 1 <= legs <= 256:
               raise SystemExit("legs must be between 1 and 256")
           print(f"legs={legs}")
@@ -143,10 +149,11 @@ jobs:
           LEGS_TOTAL: ${{ needs.plan.outputs.legs }}
         run: |
           {
+            echo "LEG_START=$(date +%s)"
             echo "SWARM_DEADLINE=$(( $(date +%s) + SWARM_MINUTES * 60 ))"
             echo "LEG_STARTED=$(date -u '+%Y-%m-%d %H:%M UTC')"
           } >> "$GITHUB_ENV"
-          echo "Leg ${LEG} of ${LEGS_TOTAL} - runs for ${SWARM_MINUTES} minutes"
+          echo "Leg ${LEG} of ${LEGS_TOTAL} - plays for ${SWARM_MINUTES} minutes"
 
       - name: Check out the latest code (every file, LFS, submodules, history)
         uses: actions/checkout@v4
@@ -255,6 +262,308 @@ jobs:
                   print(f"MISSING  {mod}: {exc}")
           PY
 
+      # ------------------------------------------------------------------
+      # All helper scripts live right here, so no other repo files are needed.
+      # ------------------------------------------------------------------
+      - name: Write helper scripts (supervisor, tunnel, waking page)
+        run: |
+          set -e
+          STATE="$RUNNER_TEMP/neon"
+          BIN="$STATE/bin"
+          mkdir -p "$BIN" "$STATE/wake"
+
+          # ---------------- waking page (shown while the game is still starting) ----------------
+          cat > "$STATE/wake/index.html" <<'WAKE_EOF'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta http-equiv="refresh" content="8">
+            <title>Neon Swarm</title>
+            <style>
+              body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+                     background: #07070d; color: #6ff; font-family: system-ui, sans-serif;
+                     text-align: center; }
+            </style>
+          </head>
+          <body>
+            <div>
+              <h1>Neon Swarm is waking up</h1>
+              <p>The game server is starting. This page refreshes itself.</p>
+            </div>
+          </body>
+          </html>
+          WAKE_EOF
+
+          # ---------------- tunnel keeper ----------------
+          cat > "$BIN/tunnel.sh" <<'TUNNEL_EOF'
+          #!/usr/bin/env bash
+          # Keeps a public tunnel alive for the whole leg and publishes its URL to <state>/public_url.
+          #   NGROK_AUTHTOKEN set  -> ngrok. With NGROK_DOMAIN the link is fixed across legs.
+          #   no token             -> cloudflared quick tunnel (random link that changes).
+          # Usage: tunnel.sh <state_dir> <port>
+          STATE="$1"
+          PORT="$2"
+          LOG="$STATE/tunnel.log"
+          URL_FILE="$STATE/public_url"
+          : > "$LOG"
+
+          run_tunnel() {
+            while true; do
+              if [ -n "${NGROK_AUTHTOKEN:-}" ]; then
+                if [ -n "${NGROK_DOMAIN:-}" ]; then
+                  ngrok http "$PORT" --url "$NGROK_DOMAIN" --log=stdout >> "$LOG" 2>&1
+                else
+                  ngrok http "$PORT" --log=stdout >> "$LOG" 2>&1
+                fi
+              else
+                cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:${PORT}" >> "$LOG" 2>&1
+              fi
+              echo "[tunnel] $(date -u +%T) client exited - restarting in 10s" >> "$LOG"
+              sleep 10
+            done
+          }
+
+          find_url() {
+            if [ -n "${NGROK_AUTHTOKEN:-}" ]; then
+              curl -s -m 3 http://127.0.0.1:4040/api/tunnels \
+                | jq -r '.tunnels[]?.public_url // empty' | grep '^https://' | head -1
+            else
+              grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOG" | tail -1
+            fi
+          }
+
+          run_tunnel &
+
+          missing=0
+          while true; do
+            url="$(find_url)"
+            if [ -n "$url" ]; then
+              echo "$url" > "$URL_FILE"
+              missing=0
+            else
+              rm -f "$URL_FILE"
+              missing=$((missing + 1))
+              if [ "$missing" -ge 18 ]; then
+                echo "[tunnel] $(date -u +%T) no link for 3 min - restarting the tunnel" >> "$LOG"
+                pkill -x ngrok 2>/dev/null
+                pkill -x cloudflared 2>/dev/null
+                missing=0
+              fi
+            fi
+            sleep 10
+          done
+          TUNNEL_EOF
+
+          # ---------------- game supervisor ----------------
+          cat > "$BIN/supervise.sh" <<'SUPERVISE_EOF'
+          #!/usr/bin/env bash
+          # Runs neon_swarm.py for one leg of the chain.
+          #   * restarts the game after crashes (with backoff), hangs and memory blow-ups
+          #   * hot-reloads when new commits land on the branch (same run, same link)
+          #   * stops cleanly (Ctrl+C first, so the game can save) when the leg's deadline arrives
+          # Expects: PORT, SWARM_DEADLINE (epoch seconds), MAX_RSS_MB, LEG, LEGS_TOTAL
+
+          STATE="${RUNNER_TEMP:-/tmp}/neon"
+          mkdir -p "$STATE"
+          GAME_LOG="$STATE/game.log"
+          EVENTS="$STATE/events.log"
+          PIDF="$STATE/game.pid"
+          RESTART="$STATE/restart.flag"
+          STOP="$STATE/stop.flag"
+          BRANCH="${GITHUB_REF_NAME:-main}"
+          : > "$GAME_LOG"
+          : > "$EVENTS"
+          rm -f "$RESTART" "$STOP"
+
+          ev() { echo "$(date -u +%T)  $*" | tee -a "$EVENTS"; }
+
+          game_pid() { cat "$PIDF" 2>/dev/null; }
+
+          alive() {
+            local pid
+            pid="$(game_pid)"
+            [ -n "$pid" ] && { kill -0 -- "-$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null; }
+          }
+
+          send() {
+            local pid
+            pid="$(game_pid)"
+            [ -n "$pid" ] || return 0
+            kill -"$1" -- "-$pid" 2>/dev/null || kill -"$1" "$pid" 2>/dev/null
+            return 0
+          }
+
+          # Ctrl+C first (lets the game save its leaderboard), then escalate.
+          stop_game() {
+            alive || return 0
+            send INT
+            for _ in $(seq 1 15); do alive || return 0; sleep 1; done
+            send TERM
+            for _ in $(seq 1 5); do alive || return 0; sleep 1; done
+            send KILL
+            return 0
+          }
+
+          start_game() {
+            rm -f "$RESTART"
+            if [ -s "$STATE/wake.pid" ]; then        # free the port from the waking page
+              kill "$(cat "$STATE/wake.pid")" 2>/dev/null
+              rm -f "$STATE/wake.pid"
+              sleep 1
+            fi
+            # Tiny launcher: restores Ctrl+C handling, gives the game its own process group, then execs it.
+            python -c 'import os, signal; signal.signal(signal.SIGINT, signal.SIG_DFL); os.setsid(); os.execvp("python", ["python", "-u", "neon_swarm.py"])' >> "$GAME_LOG" 2>&1 &
+            GAME_PID=$!
+            echo "$GAME_PID" > "$PIDF"
+          }
+
+          # Answers with an HTTP status code, or 000 when nothing listens (tries IPv4, then IPv6).
+          probe() {
+            local code
+            code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:${PORT}/" 2>/dev/null)"
+            if [ -z "$code" ] || [ "$code" = "000" ]; then
+              code="$(curl -s -g -o /dev/null -m 5 -w '%{http_code}' "http://[::1]:${PORT}/" 2>/dev/null)"
+            fi
+            echo "${code:-000}"
+          }
+
+          # ---------------- watchers ----------------
+
+          # Every minute: fetch the branch. New commits fast-forward in and the game reloads.
+          watch_repo() {
+            while sleep 60; do
+              git fetch --quiet origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" 2>/dev/null || continue
+              local_sha="$(git rev-parse HEAD)"
+              remote_sha="$(git rev-parse "refs/remotes/origin/${BRANCH}")"
+              [ "$local_sha" = "$remote_sha" ] && continue
+              changed="$(git diff --name-only "$local_sha" "$remote_sha")"
+              if ! git merge --ff-only --quiet "refs/remotes/origin/${BRANCH}" 2>/dev/null; then
+                ev "[hot-reload] cannot fast-forward to ${remote_sha:0:7} (local changes?) - skipped"
+                continue
+              fi
+              git submodule update --init --recursive --quiet 2>/dev/null
+              if echo "$changed" | grep -q '^requirements.*\.txt$' && [ -f requirements.txt ]; then
+                ev "[hot-reload] requirements changed - installing them"
+                python -m pip install --prefer-binary -r requirements.txt >> "$STATE/pip-hot.log" 2>&1 \
+                  || ev "[hot-reload] pip install failed - see pip-hot.log"
+              fi
+              if echo "$changed" | grep -qvE '\.md$|^\.github/|^LICENSE'; then
+                ev "[hot-reload] new commit ${remote_sha:0:7} on ${BRANCH} - reloading the game"
+                touch "$RESTART"
+                stop_game
+              else
+                ev "[hot-reload] docs-only commit ${remote_sha:0:7} - no restart needed"
+              fi
+            done
+          }
+
+          # Every 30 s: if the game stops answering for 3 minutes, it is hung, so restart it.
+          watch_health() {
+            local fails=0 code
+            while sleep 30; do
+              if ! alive; then fails=0; continue; fi
+              code="$(probe)"
+              if [ "$code" = "000" ]; then
+                fails=$((fails + 1))
+                if [ "$fails" -ge 6 ]; then
+                  ev "[health] no answer on port ${PORT} for 3 minutes - restarting the game"
+                  touch "$RESTART"
+                  stop_game
+                  fails=0
+                fi
+              else
+                fails=0
+              fi
+            done
+          }
+
+          # Every minute: restart the game if its memory use passes MAX_RSS_MB.
+          watch_memory() {
+            local rss_kb rss_mb
+            while sleep 60; do
+              alive || continue
+              rss_kb="$(ps -o rss= -p "$(game_pid)" 2>/dev/null | tr -d ' ')"
+              [ -n "$rss_kb" ] || continue
+              rss_mb=$((rss_kb / 1024))
+              if [ "$rss_mb" -gt "${MAX_RSS_MB:-6144}" ]; then
+                ev "[memory] game uses ${rss_mb} MB (limit ${MAX_RSS_MB} MB) - restarting it"
+                touch "$RESTART"
+                stop_game
+              fi
+            done
+          }
+
+          # Every 5 minutes: one status line for the log.
+          heartbeat() {
+            while sleep 300; do
+              local state="down"
+              alive && state="running"
+              ev "[heartbeat] leg ${LEG}/${LEGS_TOTAL} | game ${state} | link $(cat "$STATE/public_url" 2>/dev/null || echo none) | load $(cut -d' ' -f1 /proc/loadavg) | free RAM $(free -m | awk '/Mem:/{print $7}') MB"
+            done
+          }
+
+          # Sleep until the leg deadline, then stop cleanly.
+          deadline_timer() {
+            local left=$(( SWARM_DEADLINE - $(date +%s) ))
+            [ "$left" -gt 0 ] && sleep "$left"
+            ev "[deadline] this leg's time is up - stopping cleanly so the next leg takes over"
+            touch "$STOP"
+            stop_game
+          }
+
+          cleanup() {
+            touch "$STOP"
+            stop_game
+            pkill -P $$ 2>/dev/null
+            ev "[shutdown] game and watchers stopped"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT TERM
+
+          # ---------------- main loop ----------------
+
+          ev "[supervisor] leg ${LEG}/${LEGS_TOTAL} online - stops in $(( (SWARM_DEADLINE - $(date +%s)) / 60 )) min"
+
+          tail -n +1 -F "$GAME_LOG" | grep --line-buffered -v 'HTTP/1.1"' &
+          watch_repo &
+          watch_health &
+          watch_memory &
+          heartbeat &
+          deadline_timer &
+
+          crashes=0
+          backoff=2
+          while [ ! -f "$STOP" ] && [ "$(date +%s)" -lt "$SWARM_DEADLINE" ]; do
+            started=$(date +%s)
+            start_game
+            ev "[supervisor] neon_swarm.py running (pid ${GAME_PID})"
+            wait "$GAME_PID"
+            code=$?
+            kill -KILL -- "-$GAME_PID" 2>/dev/null     # clear any leftover children
+            [ -f "$STOP" ] && break
+            if [ -f "$RESTART" ]; then
+              ev "[supervisor] planned restart - starting the game again"
+              backoff=2
+              continue
+            fi
+            ran=$(( $(date +%s) - started ))
+            [ "$ran" -gt 300 ] && backoff=2            # ran a while, so this was not a crash loop
+            crashes=$((crashes + 1))
+            ev "[supervisor] crash #${crashes}: exit code ${code} after ${ran}s - restarting in ${backoff}s"
+            sleep "$backoff"
+            backoff=$(( backoff * 2 > 60 ? 60 : backoff * 2 ))
+          done
+          ev "[supervisor] leg ${LEG}/${LEGS_TOTAL} finished with ${crashes} crash restart(s)"
+          exit 0
+          SUPERVISE_EOF
+
+          chmod +x "$BIN/tunnel.sh" "$BIN/supervise.sh"
+          bash -n "$BIN/tunnel.sh"
+          bash -n "$BIN/supervise.sh"
+          echo "Helper scripts written and syntax-checked in $BIN"
+
       - name: Start the virtual display and D-Bus session
         run: |
           set +e
@@ -277,10 +586,9 @@ jobs:
         run: |
           set +e
           STATE="$RUNNER_TEMP/neon"
-          mkdir -p "$STATE/wake" .neon-state
+          mkdir -p .neon-state
 
           # A waking page answers on the game port, so the link never goes dead during setup.
-          cp .github/neon/waking.html "$STATE/wake/index.html"
           python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$STATE/wake" > "$STATE/wake.log" 2>&1 &
           echo $! > "$STATE/wake.pid"
 
@@ -291,8 +599,7 @@ jobs:
             command -v cloudflared >/dev/null || { sudo curl -fsSL -o /usr/local/bin/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 && sudo chmod +x /usr/local/bin/cloudflared; }
           fi
 
-          chmod +x .github/neon/tunnel.sh
-          nohup .github/neon/tunnel.sh "$STATE" "$PORT" > "$STATE/tunnel-supervisor.log" 2>&1 &
+          nohup "$STATE/bin/tunnel.sh" "$STATE" "$PORT" > "$STATE/tunnel-supervisor.log" 2>&1 &
           echo $! > "$STATE/tunnel.pid"
 
           url=""
@@ -311,7 +618,7 @@ jobs:
               if [ -n "$NGROK_DOMAIN" ]; then
                 echo "_Fixed link: the same address every leg and every restart._"
               else
-                echo "_Random link that changes each leg. Set NGROK_DOMAIN for a fixed one._"
+                echo "_Random link that changes each leg. Set NGROK_AUTHTOKEN and NGROK_DOMAIN for a fixed one._"
               fi
             } >> "$GITHUB_STEP_SUMMARY"
             previous="$(cat .neon-state/last_url 2>/dev/null || true)"
@@ -329,7 +636,7 @@ jobs:
         env:
           LEG: ${{ matrix.leg }}
           LEGS_TOTAL: ${{ needs.plan.outputs.legs }}
-        run: bash .github/neon/supervise.sh
+        run: bash "$RUNNER_TEMP/neon/bin/supervise.sh"
 
       - name: Stop the tunnel and waking page (frees the link for the next leg)
         if: ${{ always() }}
@@ -339,7 +646,7 @@ jobs:
           for f in tunnel.pid wake.pid; do
             if [ -s "$STATE/$f" ]; then kill "$(cat "$STATE/$f")" 2>/dev/null; fi
           done
-          pkill -f 'neon/tunnel.sh' 2>/dev/null
+          pkill -f 'neon/bin/tunnel.sh' 2>/dev/null
           pkill -x ngrok 2>/dev/null
           pkill -x cloudflared 2>/dev/null
           exit 0
@@ -417,10 +724,22 @@ jobs:
           fi
           exit 0
 
+      # If setup failed, wait a bit so a broken leg cannot burn through the whole chain in minutes.
+      - name: Cool down after a failed leg
+        if: ${{ failure() }}
+        run: |
+          echo "::warning::This leg failed. Waiting 5 minutes before the next leg starts."
+          sleep 300
+
       - name: Hand off to the next chain (last leg only, because GitHub ends runs at 35 days)
         if: ${{ !cancelled() && matrix.leg == fromJSON(needs.plan.outputs.legs) }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          elapsed=$(( $(date +%s) - LEG_START ))
+          if [ "$elapsed" -lt 3600 ]; then
+            echo "::error::The last leg ran only $(( elapsed / 60 )) min, so the chain looks broken. Not handing off, to avoid a runaway loop."
+            exit 0
+          fi
           echo "::notice::Last leg reached - queuing the next chain"
           gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" -f event_type=neon-swarm-handoff
