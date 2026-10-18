@@ -155,10 +155,10 @@ const Admin={password:'12345678',key:'neonswarm.admin',config:{fireRate:10,damag
   open(from){this.returnTo=from;$('admin-lock-status').textContent='';$('admin-password').value='';Game.set(this.unlocked?'admin':'admin-lock')},
   unlock(){if($('admin-password').value!==this.password){$('admin-lock-status').textContent='Incorrect password.';return}this.unlocked=true;$('admin-lock-status').textContent='Admin commands unlocked for this session.';this.render();Game.set('admin')},
   close(){Game.set(this.returnTo)},
-  setFireRate(value){this.config.fireRate=clamp(Math.round(Number(value)||1),1,30);this.save();this.render()},
-  setDamage(value){this.config.damage=clamp(Math.round(Number(value)||1),1,10000);this.save();this.render()},
-  setShieldDuration(value){this.config.shieldDuration=clamp(Math.round(Number(value)||1),1,600);this.save()},
-  grantShield(){const duration=clamp(Number($('admin-shield-duration').value)||this.config.shieldDuration,1,600);this.setShieldDuration(duration);if(Game.p)Game.p.shield=Math.max(Game.p.shield,duration);else this.pendingShield=duration;$('admin-status').textContent=Game.p?'Shield granted for '+duration+' seconds.':'Shield queued for the next run ('+duration+' seconds).'}};
+  setFireRate(value){this.config.fireRate=clamp(Math.round(Number(value)||1),1,300);this.save();this.render()},
+  setDamage(value){this.config.damage=clamp(Math.round(Number(value)||1),1,1000000);this.save();this.render()},
+  setShieldDuration(value){this.config.shieldDuration=clamp(Math.round(Number(value)||1),1,100);this.save()},
+  grantShield(){const duration=clamp(Number($('admin-shield-duration').value)||this.config.shieldDuration,1,100);this.setShieldDuration(duration);if(Game.p)Game.p.shield=Math.max(Game.p.shield,duration);else this.pendingShield=duration;$('admin-status').textContent=Game.p?'Shield granted for '+duration+' seconds.':'Shield queued for the next run ('+duration+' seconds).'}};
 
 /* ================= FX: particles, rings, floating text, shake ================= */
 const FX={parts:[],texts:[],rings:[],shake:0,flash:0,
