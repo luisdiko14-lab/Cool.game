@@ -8,7 +8,7 @@ You start with 200/200 HP. Enemy projectiles deal 10 damage. Health pickups rest
 
 ## Download game files!
 
-[Download](https://github.com/luisdiko14-lab/Cool.game/archive/refs/tags/finished-game.zip‘) Link if that doesn’t work: https://github.com/luisdiko14-lab/Cool.game/archive/refs/tags/finished-game.zip
+[Download](https://github.com/luisdiko14-lab/Cool.game/archive/refs/tags/finished-game.zip) Link if that doesn’t work: https://github.com/luisdiko14-lab/Cool.game/archive/refs/tags/finished-game.zip
 
 ### Open the standalone game
 
