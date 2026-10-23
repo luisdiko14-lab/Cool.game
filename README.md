@@ -6,6 +6,10 @@ You start with 200/200 HP. Enemy projectiles deal 10 damage. Health pickups rest
 
 ## Play
 
+## Download game files!
+
+[Download](https://github.com/luisdiko14-lab/Cool.game/archive/refs/tags/finished-game.zip‘) Link if that doesn’t work: https://github.com/luisdiko14-lab/Cool.game/archive/refs/tags/finished-game.zip
+
 ### Open the standalone game
 
 Open [`Neon Swarm.html`](Neon%20Swarm.html) in a modern browser. It needs no installation or build step. Personal high scores, settings, credits, and selected ship skins are stored in that browser. The Settings screen controls music and effects volume. The bundled `MATADORA (Sped Up).mp3` track starts after pressing Start. Phones get an on-screen joystick and dash button. The Syne font is optional and loads from Google Fonts when online.
