@@ -39,6 +39,10 @@ The server prints the network address to open on your phone. Submitted scores ar
 | Pause or resume | P or Escape | Pause button |
 | Toggle sound | M | Not available |
 
+
 ## License
 
 This project is available under the MIT License. See [`LICENSE`](LICENSE) for details.
+
+
+## Credits to [claude.ai](https://claude.ai) for the README.md information!
