@@ -71,15 +71,15 @@ input:focus{border-color:var(--cyan)}
 <section class="panel" id="pause"><h2>Paused</h2><button id="resume">Resume</button><button class="alt" id="settings-pause" type="button">Settings</button><button class="alt" id="admin-open-pause" type="button">Admin commands</button><button class="alt" id="quit">Quit to menu</button></section>
 <section class="panel" id="settings"><h2>Settings</h2><label class="setting-row"><span>Music</span><input id="music-enabled" type="checkbox"></label><label class="setting-row"><span>Music volume</span><input id="music-volume" type="range" min="0" max="100" value="35"></label><label class="setting-row"><span>Effects volume</span><input id="effects-volume" type="range" min="0" max="100" value="65"></label><button class="alt" id="settings-close" type="button">Done</button></section>
 <section class="panel" id="admin-lock"><h2>Admin Access</h2><label class="setting-row"><span>Password</span><input id="admin-password" type="password" inputmode="numeric" autocomplete="off" maxlength="16"></label><p id="admin-lock-status" role="status" aria-live="polite"></p><button id="admin-unlock" type="button">Unlock</button><button class="alt" id="admin-lock-close" type="button">Back</button></section>
-<section class="panel" id="admin"><h2>Admin Commands</h2><p>Local gameplay overrides. These controls are not secure server administration.</p><label class="setting-row"><span>Shield duration (seconds)</span><input id="admin-shield-duration" type="number" min="1" max="600" step="1" value="10"></label><button id="admin-grant-shield" type="button">Grant shield</button><label class="setting-row"><span>Fire rate <output id="admin-fire-rate-value">10</output> shots/sec</span><input id="admin-fire-rate" type="range" min="1" max="30" step="1" value="10"></label><label class="setting-row"><span>Damage per shot <output id="admin-damage-value">500</output></span><input id="admin-damage" type="range" min="1" max="10000" step="1" value="500"></label><p id="admin-status" role="status" aria-live="polite"></p><button class="alt" id="admin-close" type="button">Done</button></section>
+<section class="panel" id="admin"><h2>Admin Commands</h2><p>Local gameplay overrides. These controls are not secure server administration.</p><label class="setting-row"><span>Shield duration (seconds)</span><input id="admin-shield-duration" type="number" min="1" max="100" step="1" value="10"></label><button id="admin-grant-shield" type="button">Grant shield</button><label class="setting-row"><span>Fire rate <output id="admin-fire-rate-value">10</output> shots/sec</span><input id="admin-fire-rate" type="range" min="1" max="50" step="1" value="10"></label><label class="setting-row"><span>Damage per shot <output id="admin-damage-value">500</output></span><input id="admin-damage" type="range" min="1" max="10000000" step="1" value="500"></label><p id="admin-status" role="status" aria-live="polite"></p><button class="alt" id="admin-close" type="button">Done</button></section>
 <section class="panel" id="over"><h2 id="ovt">Signal lost</h2><div id="sc"></div><ol class="board" id="b1"></ol><div id="sv" hidden><input id="nm" maxlength="12" placeholder="Your name" autocomplete="off"><button class="alt" id="sub">Submit score</button></div><button id="again">Play again</button><button class="alt" id="home">Menu</button></section>
 <script>
 'use strict';
 /* ================= CONFIG & HELPERS ================= */
 const VIEW=560,TAU=Math.PI*2,FONT='"Syne","Trebuchet MS",system-ui,sans-serif'; // VIEW = logical units on the short screen side
 const COL={cyan:'#3df5ff',pink:'#ff3d9a',gold:'#ffc23d',vio:'#9b5cff',mint:'#6dffb0'};
-const MAX_WAVE=50;
-const BOSS_HP={5:4500,6:25000,7:50000,8:75000,9:100000,10:100000,30:1000000,50:5000000};
+const MAX_WAVE=60;
+const BOSS_HP={5:4500,6:25000,7:50000,8:75000,9:100000,10:100000,30:1000000,50:5000000,60:1000000000};
 const SKINS=[{id:'cyan',name:'Neon',color:COL.cyan,cost:0},{id:'gold',name:'Solar',color:COL.gold,cost:250},{id:'mint',name:'Mint',color:COL.mint,cost:650},{id:'pink',name:'Pulse',color:COL.pink,cost:1100},{id:'nova',name:'Nova',color:'#ff3df5',cost:0,winOnly:true}];
 const TYPES={drone:{hp:1,r:9,spd:95,pts:10,col:COL.pink,n:4,gems:1},shooter:{hp:5,r:12,spd:78,pts:45,col:COL.gold,n:3,gems:2},tank:{hp:9,r:19,spd:42,pts:70,col:COL.vio,n:8,gems:4},lancer:{hp:2,r:10,spd:70,pts:25,col:'#ff7a1a',n:3,gems:2},spinner:{hp:7,r:15,spd:55,pts:60,col:'#5b8cff',n:6,gems:3},bomber:{hp:2,r:11,spd:120,pts:30,col:'#ff4d4d',n:5,gems:2},boss:{hp:1000000,r:52,spd:0,pts:50000,col:'#ff3df5',n:10,gems:80}};
 const PAT=[[0],[-.07,.07],[-.17,0,.17],[-.22,-.08,.08,.22],[-.32,-.16,0,.16,.32]]; // shot spread per weapon level
@@ -149,15 +149,15 @@ const Settings={key:'neonswarm.settings',data:{music:true,musicVolume:.35,effect
   close(){Game.set(this.returnTo)}};
 const Admin={password:'12345678',key:'neonswarm.admin',config:{fireRate:10,damage:500,shieldDuration:10},unlocked:false,pendingShield:0,returnTo:'menu',
   init(){let saved={};try{saved=JSON.parse(localStorage.getItem(this.key))||{}}catch(e){}
-    this.config={fireRate:clamp(Number(saved.fireRate)||10,1,30),damage:clamp(Number(saved.damage)||500,1,1000000),shieldDuration:clamp(Number(saved.shieldDuration)||10,1,100)};this.render()},
+    this.config={fireRate:clamp(Number(saved.fireRate)||10,1,50),damage:clamp(Number(saved.damage)||500,1,10000000),shieldDuration:clamp(Number(saved.shieldDuration)||10,1,100)};this.render()},
   save(){try{localStorage.setItem(this.key,JSON.stringify(this.config))}catch(e){}},
   render(){$('admin-fire-rate').value=this.config.fireRate;$('admin-fire-rate-value').textContent=this.config.fireRate;$('admin-damage').value=this.config.damage;$('admin-damage-value').textContent=this.config.damage;$('admin-shield-duration').value=this.config.shieldDuration},
   open(from){this.returnTo=from;$('admin-lock-status').textContent='';$('admin-password').value='';Game.set(this.unlocked?'admin':'admin-lock')},
   unlock(){if($('admin-password').value!==this.password){$('admin-lock-status').textContent='Incorrect password.';return}this.unlocked=true;$('admin-lock-status').textContent='Admin commands unlocked for this session.';this.render();Game.set('admin')},
   close(){Game.set(this.returnTo)},
-  setFireRate(value){this.config.fireRate=clamp(Math.round(Number(value)||1),1,300);this.save();this.render()},
-  setDamage(value){this.config.damage=clamp(Math.round(Number(value)||1),1,1000000);this.save();this.render()},
-  setShieldDuration(value){this.config.shieldDuration=clamp(Math.round(Number(value)||1),1,100);this.save()},
+  setFireRate(value){this.config.fireRate=clamp(Math.round(Number(value)||1),1,50);this.save();this.render()},
+  setDamage(value){this.config.damage=clamp(Math.round(Number(value)||1),1,10000000);this.save();this.render()},
+  setShieldDuration(value){this.config.shieldDuration=clamp(Math.round(Number(value)||1),1,100);this.save();this.render()},
   grantShield(){const duration=clamp(Number($('admin-shield-duration').value)||this.config.shieldDuration,1,100);this.setShieldDuration(duration);if(Game.p)Game.p.shield=Math.max(Game.p.shield,duration);else this.pendingShield=duration;$('admin-status').textContent=Game.p?'Shield granted for '+duration+' seconds.':'Shield queued for the next run ('+duration+' seconds).'}};
 
 /* ================= FX: particles, rings, floating text, shake ================= */
@@ -282,26 +282,29 @@ const Game={state:'menu',time:0,best:0,p:null,
     if(Math.hypot(p.vx,p.vy)>40)FX.burst(p.x-Math.cos(p.face)*10,p.y-Math.sin(p.face)*10,COL.cyan,1,30,.3,2.4);
     let near=null,nd=1e9;for(const e of this.enemies){const d=(e.x-p.x)**2+(e.y-p.y)**2;if(d<nd&&this.onScreen(e)){nd=d;near=e}}
     p.aim=near?Math.atan2(near.y-p.y,near.x-p.x):p.face;
-    if((p.fireT-=dt)<=0&&near){p.fireT=Admin.unlocked?1/Admin.config.fireRate:Math.max(.045,.18-this.lvl*.022-(p.rapid>0?.07:0));Sfx.play('shoot');
-      for(const o of PAT[this.lvl-1])this.bullets.push({x:p.x,y:p.y,vx:Math.cos(p.aim+o)*650,vy:Math.sin(p.aim+o)*650,life:1.1})}},
+    const fireInterval=Admin.unlocked?1/clamp(Admin.config.fireRate,1,50):Math.max(.045,.18-this.lvl*.022-(p.rapid>0?.07:0));
+    if(near){p.fireT-=dt;if(p.fireT<=0)while(p.fireT<=0){p.fireT+=fireInterval;Sfx.play('shoot');
+      for(const o of PAT[this.lvl-1])this.bullets.push({x:p.x,y:p.y,vx:Math.cos(p.aim+o)*650,vy:Math.sin(p.aim+o)*650,life:1.1})}}
+    else p.fireT=fireInterval},
   add(k,x,y,hp){const T=TYPES[k],health=hp||T.hp;this.enemies.push({k,x,y,hp:health,mhp:health,r:T.r,fireT:rnd(.4,1.5),t:0,sa:rnd(0,TAU),flash:0,ang:rnd(0,TAU)})},
   spawnWave(){const W=view.w,cols=Math.min(5,Math.max(3,Math.floor((W-80)/100)));
     const formations=[[],['drone','drone','drone','drone','drone'],['drone','shooter','drone','shooter','drone','drone'],['drone','shooter','spinner','shooter','lancer','drone','bomber','drone'],['shooter','tank','bomber','spinner','shooter','bomber','lancer','shooter','tank'],[],['shooter','spinner','tank','bomber','lancer','shooter','spinner','tank','bomber','drone','lancer','shooter'],['tank','shooter','spinner','bomber','lancer','tank','shooter','spinner','bomber','lancer','tank','shooter','bomber','spinner'],['spinner','tank','bomber','shooter','lancer','spinner','tank','bomber','shooter','lancer','spinner','tank','bomber','shooter','lancer','tank'],['tank','spinner','bomber','shooter','lancer','tank','spinner','bomber','shooter','lancer','tank','spinner','bomber','shooter','lancer','tank','spinner','bomber']];
     const healthDrops=this.wave===5?20:this.wave===29?30:0;
     for(let i=0;i<healthDrops;i++){const row=Math.floor(i/6);this.pu.push({x:W*(.1+(i%6)*.16),y:view.h*(.57+row*.065),k:'life',t:45,a:0})}
-    const bossHealth=BOSS_HP[this.wave];if(bossHealth){const final=this.wave===MAX_WAVE;this.add('boss',W/2,view.h*.22,bossHealth);if(final||this.wave===30){this.enemies[this.enemies.length-1].r=88;this.p.maxHp=10000;this.p.hp=10000}this.p.shield=10;FX.text(W/2,view.h*.31,'BOSS SHIELD 10s',COL.cyan,24);
-      const guards=final?['shooter','spinner','tank','bomber','shooter','spinner','tank','bomber']:this.wave>=6&&this.wave<=9?['shooter','spinner','tank','bomber','shooter','spinner']:['shooter','spinner','shooter','spinner'];guards.forEach((k,i)=>this.add(k,W/2+(i-(guards.length-1)/2)*Math.min(105,(W-90)/Math.max(1,guards.length-1)),view.h*.43));
+    const bossHealth=BOSS_HP[this.wave];if(bossHealth){const final=this.wave===MAX_WAVE;this.add('boss',W/2,view.h*.22,bossHealth);if(final||this.wave===30||this.wave===50){this.enemies[this.enemies.length-1].r=88;this.p.maxHp=10000;this.p.hp=10000}this.p.shield=10;FX.text(W/2,view.h*.31,'BOSS SHIELD 10s',COL.cyan,24);
+      const guards=final||this.wave===50?['shooter','spinner','tank','bomber','shooter','spinner','tank','bomber']:this.wave>=6&&this.wave<=9?['shooter','spinner','tank','bomber','shooter','spinner']:['shooter','spinner','shooter','spinner'];guards.forEach((k,i)=>this.add(k,W/2+(i-(guards.length-1)/2)*Math.min(105,(W-90)/Math.max(1,guards.length-1)),view.h*.43));
       FX.text(W/2,view.h*.38,final?'FINAL BOSS':'WAVE '+this.wave+' BOSS',COL.pink,30);return}
     const enemyKinds=['drone','shooter','spinner','tank','bomber','lancer'];
     const kinds=this.wave>=11?Array.from({length:Math.min(30,this.wave+5)},(_,i)=>enemyKinds[(i*3+this.wave)%enemyKinds.length]):formations[this.wave];
     const rows=Math.ceil(kinds.length/cols),rowGap=Math.min(88,(view.h-140)/Math.max(1,rows-1)),startY=Math.max(48,(view.h-rowGap*(rows-1))*.22);
     kinds.forEach((k,i)=>{const row=Math.floor(i/cols),rowKinds=Math.min(cols,kinds.length-row*cols),col=i%cols,gap=Math.min(110,(W-100)/Math.max(1,rowKinds-1));this.add(k,W/2+(col-(rowKinds-1)/2)*gap,startY+row*rowGap)})},
-  clearWave(){this.betweenWaves=true;this.waveDelay=2;const reward=this.wave*150;this.score+=this.wave*250;Profile.reward(this.wave);FX.text(view.w/2,view.h*.32,'WAVE CLEAR  +'+reward+' CREDITS',COL.gold,25)},
-  victory(){this.won=true;this.score+=2500;Profile.victory();this.over()},
-  damage(e,n){if(e.k==='boss'&&(this.wave===30||this.wave===MAX_WAVE)){if(this.time<(e.nextHitAt||0))return;e.nextHitAt=this.time+.15;n=Math.min(n,10000)}e.hp-=n;e.flash=.08;if(this.time-this.hitT>.05){this.hitT=this.time;Sfx.play('hit')}if(e.hp<=0&&!e.dead)this.kill(e)},
+  awardScore(points){const earned=points*(this.wave>=10?20:1);this.score+=earned;return earned},
+  clearWave(){this.betweenWaves=true;this.waveDelay=2;const reward=this.wave*150;this.awardScore(this.wave*250);Profile.reward(this.wave);FX.text(view.w/2,view.h*.32,'WAVE CLEAR  +'+reward+' CREDITS',COL.gold,25)},
+  victory(){this.won=true;this.awardScore(2500);Profile.victory();this.over()},
+  damage(e,n){if(e.k==='boss'&&(this.wave===30||this.wave===50||this.wave===MAX_WAVE)){if(this.time<(e.nextHitAt||0))return;e.nextHitAt=this.time+.15;n=Math.min(n,this.wave===MAX_WAVE?10000000:10000)}e.hp-=n;e.flash=.08;if(this.time-this.hitT>.05){this.hitT=this.time;Sfx.play('hit')}if(e.hp<=0&&!e.dead)this.kill(e)},
   kill(e){e.dead=true;const T=TYPES[e.k],old=this.mult;
     this.combo++;this.comboT=2.6;this.mult=Math.min(8,1+Math.floor(this.combo/5));
-    const pts=T.pts*this.mult;this.score+=pts;
+    const pts=this.awardScore(T.pts*this.mult);
     FX.burst(e.x,e.y,T.col,T.n*5,300,.7,3.2);FX.burst(e.x,e.y,'#fff',6,200,.35,2);FX.hit(e.k==='tank'?9:4);Sfx.play('boom');
     FX.text(e.x,e.y-12,'+'+pts,T.col,e.k==='tank'?24:16);
     if(this.mult>old)FX.text(this.p.x,this.p.y-32,'Combo x'+this.mult,COL.pink,20);
@@ -310,10 +313,10 @@ const Game={state:'menu',time:0,best:0,p:null,
     if(e.k==='bomber')for(let i=0;i<8;i++){const a=i*TAU/8;this.eb.push({x:e.x,y:e.y,vx:Math.cos(a)*170,vy:Math.sin(a)*170,life:5})} // bombers burst into a bullet ring
     if(e.k==='boss'){this.eb.length=0;FX.flash=.6;FX.hit(22);FX.ring(e.x,e.y,Math.max(view.w,view.h),T.col);Sfx.play('win')}
     if(e.k==='boss'||Math.random()<.07)this.pu.push({x:e.x,y:e.y,k:e.k==='boss'?'life':['shield','bomb','life','rapid'][Math.floor(rnd(0,4))],t:12,a:0})},
-  gem(g){this.score+=5*this.mult;Sfx.play('gem',this.combo);FX.burst(g.x,g.y,COL.mint,4,120,.3,2);
+  gem(g){this.awardScore(5*this.mult);Sfx.play('gem',this.combo);FX.burst(g.x,g.y,COL.mint,4,120,.3,2);
     if(++this.xp>=this.need){this.xp=0;this.need+=4;this.levelUp()}},
   levelUp(){const p=this.p;
-    if(this.lvl<5){this.lvl++;FX.text(p.x,p.y-30,'Weapon up!',COL.gold,22)}else{const bonus=200*this.mult;this.score+=bonus;FX.text(p.x,p.y-30,'+'+bonus,COL.gold,22)}
+    if(this.lvl<5){this.lvl++;FX.text(p.x,p.y-30,'Weapon up!',COL.gold,22)}else{const bonus=this.awardScore(200*this.mult);FX.text(p.x,p.y-30,'+'+bonus,COL.gold,22)}
     this.blast(2,COL.gold);Sfx.play('up');
     
     },
