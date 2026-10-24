@@ -65,6 +65,28 @@ input:focus{border-color:var(--cyan)}
 .setting-row{display:grid;grid-template-columns:minmax(110px,1fr) minmax(120px,1.2fr);align-items:center;gap:14px;width:min(340px,88vw);color:var(--ink);text-align:left}
 .setting-row input[type=range]{width:100%;accent-color:var(--cyan)}
 .setting-row input[type=checkbox]{width:22px;height:22px;justify-self:end;accent-color:var(--cyan)}
+#admin-damage{width:100%;min-width:0}
+.arcade-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;width:min(560px,94vw)}
+.arcade-game{min-height:88px;padding:12px 8px;border-radius:8px;font-size:16px}
+.arcade-game small{display:block;color:var(--dim);font-size:12px}
+.arcade-board{width:min(82vw,380px);aspect-ratio:1;display:grid;gap:4px;padding:6px;border:2px solid rgba(61,245,255,.5);border-radius:8px;background:rgba(13,5,36,.82)}
+.snake-board{grid-template-columns:repeat(16,minmax(0,1fr));grid-template-rows:repeat(16,minmax(0,1fr))}
+.snake-cell{border-radius:2px;background:rgba(165,146,214,.08)}
+.snake-cell.body{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+.snake-cell.head{background:var(--gold);box-shadow:0 0 10px var(--gold)}
+.snake-cell.food{background:var(--pink);border-radius:50%;box-shadow:0 0 10px var(--pink)}
+.tile-board{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:repeat(4,minmax(0,1fr));background:rgba(13,5,36,.92)}
+.tile{min-width:0;padding:0;border:1px solid rgba(255,255,255,.08);border-radius:5px;background:var(--tile-color,#261346);box-shadow:none;font-size:clamp(18px,5vw,34px);font-weight:800}
+.tile:hover,.tile:focus-visible{transform:none;box-shadow:inset 0 0 14px rgba(255,255,255,.18)}
+.memory-board{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:repeat(4,minmax(0,1fr))}
+.memory-card{min-width:0;padding:0;border-radius:6px;font-size:clamp(18px,5vw,30px)}
+.direction-pad{display:grid;grid-template-columns:repeat(3,54px);grid-template-rows:repeat(2,44px);gap:6px;justify-content:center}
+.direction-pad button{padding:0;border-radius:6px;font-size:13px}
+.direction-pad button:first-child{grid-column:2}
+.direction-pad button:nth-child(2){grid-column:1;grid-row:2}
+.direction-pad button:nth-child(3){grid-column:2;grid-row:2}
+.direction-pad button:nth-child(4){grid-column:3;grid-row:2}
+.arcade-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 #touch-controls{display:none}
 @media (pointer:coarse),(max-width:720px){
   .panel{gap:10px;padding:14px}
@@ -86,19 +108,25 @@ input:focus{border-color:var(--cyan)}
 <audio id="bg-music" src="MATADORA%20(Sped%20Up).mp3" loop preload="none"></audio>
 <section class="panel on" id="menu">
 <h1>Neon<br>Swarm</h1>
-<p>Survive 50 fixed formations. Bosses guard key waves, and wave 50 is the final fight. Collect health, tune audio, and use the mobile controls when playing on a phone.</p>
+<p>Survive 60 fixed formations. Bosses guard key waves, and wave 60 is the final fight. Collect health, tune audio, and use the mobile controls when playing on a phone.</p>
 <p>Move with WASD, arrow keys or by dragging. Dash with Space, Shift or a quick tap. P pauses and M mutes.</p>
-<p id="profile"></p><div id="skins" aria-label="Ship skins"></div>
+<p id="profile"></p><p id="save-status" role="status" aria-live="polite">Progress saves in this browser for this site address.</p><div id="skins" aria-label="Ship skins"></div>
 <ol class="board" id="b0"></ol>
 <button class="alt" id="settings-open" type="button">Settings</button>
+<button class="alt" id="games-open-menu" type="button">Other games!</button>
 <button class="alt" id="admin-open-menu" type="button">Admin commands</button>
 <button id="play">Start run</button>
 </section>
-<section class="panel" id="pause"><h2>Paused</h2><button id="resume">Resume</button><button class="alt" id="settings-pause" type="button">Settings</button><button class="alt" id="admin-open-pause" type="button">Admin commands</button><button class="alt" id="quit">Quit to menu</button></section>
+<section class="panel" id="pause"><h2>Paused</h2><button id="resume">Resume</button><button class="alt" id="settings-pause" type="button">Settings</button><button class="alt" id="games-open-pause" type="button">Other games!</button><button class="alt" id="admin-open-pause" type="button">Admin commands</button><button class="alt" id="quit">Quit to menu</button></section>
 <section class="panel" id="settings"><h2>Settings</h2><label class="setting-row"><span>Music</span><input id="music-enabled" type="checkbox"></label><label class="setting-row"><span>Music volume</span><input id="music-volume" type="range" min="0" max="100" value="35"></label><label class="setting-row"><span>Effects volume</span><input id="effects-volume" type="range" min="0" max="100" value="65"></label><button class="alt" id="settings-close" type="button">Done</button></section>
 <section class="panel" id="admin-lock"><h2>Admin Access</h2><label class="setting-row"><span>Password</span><input id="admin-password" type="password" inputmode="numeric" autocomplete="off" maxlength="16"></label><p id="admin-lock-status" role="status" aria-live="polite"></p><button id="admin-unlock" type="button">Unlock</button><button class="alt" id="admin-lock-close" type="button">Back</button></section>
-<section class="panel" id="admin"><h2>Admin Commands</h2><p>Local gameplay overrides. These controls are not secure server administration.</p><label class="setting-row"><span>Shield duration (seconds)</span><input id="admin-shield-duration" type="number" min="1" max="100" step="1" value="10"></label><button id="admin-grant-shield" type="button">Grant shield</button><label class="setting-row"><span>Fire rate <output id="admin-fire-rate-value">10</output> shots/sec</span><input id="admin-fire-rate" type="range" min="1" max="50" step="1" value="10"></label><label class="setting-row"><span>Damage per shot <output id="admin-damage-value">500</output></span><input id="admin-damage" type="range" min="1" max="10000000" step="1" value="500"></label><p id="admin-status" role="status" aria-live="polite"></p><button class="alt" id="admin-close" type="button">Done</button></section>
-<section class="panel" id="over"><h2 id="ovt">Signal lost</h2><div id="sc"></div><ol class="board" id="b1"></ol><div id="sv" hidden><input id="nm" maxlength="12" placeholder="Your name" autocomplete="off"><button class="alt" id="sub">Submit score</button></div><button id="again">Play again</button><button class="alt" id="home">Menu</button></section>
+<section class="panel" id="admin"><h2>Admin Commands</h2><p>Local gameplay overrides. These controls are not secure server administration.</p><label class="setting-row"><span>Shield duration (seconds)</span><input id="admin-shield-duration" type="number" min="1" max="100" step="1" value="10"></label><button id="admin-grant-shield" type="button">Grant shield</button><label class="setting-row"><span>Fire rate <output id="admin-fire-rate-value">10</output> shots/sec</span><input id="admin-fire-rate" type="range" min="1" max="50" step="1" value="10"></label><label class="setting-row"><span>Damage per shot <output id="admin-damage-value">500</output></span><input id="admin-damage" type="number" min="1" max="10000000" step="1" value="500"></label><p id="admin-status" role="status" aria-live="polite"></p><button class="alt" id="admin-close" type="button">Done</button></section>
+<section class="panel" id="admin"><h2>Admin Commands</h2><p>Local gameplay overrides. These controls are not secure server administration.</p><label class="setting-row"><span>Shield duration (seconds)</span><input id="admin-shield-duration" type="number" min="1" max="100" step="1" value="10"></label><button id="admin-grant-shield" type="button">Grant shield</button><label class="setting-row"><span>Fire rate <output id="admin-fire-rate-value">10</output> shots/sec</span><input id="admin-fire-rate" type="range" min="1" max="50" step="1" value="10"></label><label class="setting-row"><span>Damage per shot <output id="admin-damage-value">500</output></span><input id="admin-damage" type="number" min="1" max="10000000" step="1" value="500"></label><p id="admin-status" role="status" aria-live="polite"></p><button class="alt" id="admin-close" type="button">Done</button></section>
+<section class="panel" id="games"><h2>Other games!</h2><p id="arcade-records">Best scores save in this browser.</p><div class="arcade-grid"><button class="arcade-game" data-launch-game="snake">Snake<small>Eat, grow, don't collide</small></button><button class="arcade-game" data-launch-game="tile">2048<small>Join tiles to reach 2048</small></button><button class="arcade-game" data-launch-game="memory">Memory<small>Match all eight pairs</small></button></div><button class="alt" id="games-back" type="button">Back</button></section>
+<section class="panel" id="snake"><h2>Snake</h2><p id="snake-status" role="status" aria-live="polite"></p><div id="snake-board" class="arcade-board snake-board" aria-label="Snake game board"></div><div class="direction-pad"><button data-snake-dir="up">UP</button><button data-snake-dir="left">LEFT</button><button data-snake-dir="down">DOWN</button><button data-snake-dir="right">RIGHT</button></div><div class="arcade-actions"><button class="alt" id="snake-restart" type="button">Restart</button><button class="alt" data-games-back type="button">Other games</button></div></section>
+<section class="panel" id="game2048"><h2>2048</h2><p id="tile-status" role="status" aria-live="polite"></p><div id="tile-board" class="arcade-board tile-board" aria-label="2048 board"></div><div class="direction-pad"><button data-tile-dir="up">UP</button><button data-tile-dir="left">LEFT</button><button data-tile-dir="down">DOWN</button><button data-tile-dir="right">RIGHT</button></div><div class="arcade-actions"><button class="alt" id="tile-restart" type="button">New game</button><button class="alt" data-games-back type="button">Other games</button></div></section>
+<section class="panel" id="memory"><h2>Memory Match</h2><p id="memory-status" role="status" aria-live="polite"></p><div id="memory-board" class="arcade-board memory-board" aria-label="Memory match board"></div><div class="arcade-actions"><button class="alt" id="memory-restart" type="button">Restart</button><button class="alt" data-games-back type="button">Other games</button></div></section>
+<section class="panel" id="over"><h2 id="ovt">Signal lost</h2><div id="sc"></div><ol class="board" id="b1"></ol><div id="sv" hidden><input id="nm" maxlength="12" placeholder="Your name" autocomplete="off"><button class="alt" id="sub">Save score</button></div><p id="submit-status" role="status" aria-live="polite"></p><button id="again">Play again</button><button class="alt" id="home">Menu</button></section>
 <script>
 'use strict';
 /* ================= CONFIG & HELPERS ================= */
@@ -116,13 +144,14 @@ let view={cw:1,ch:1,dpr:1,s:1,w:VIEW,h:VIEW},bg;
 
 /* ================= STORAGE (top 5 scores) ================= */
 const Store={key:'neonswarm.scores',
-  load(){try{const a=JSON.parse(localStorage.getItem(this.key));return Array.isArray(a)?a.slice(0,5):[]}catch(e){return[]}},
-  save(a){try{localStorage.setItem(this.key,JSON.stringify(a))}catch(e){}}};
+  load(){try{const a=JSON.parse(localStorage.getItem(this.key));return Array.isArray(a)?a.map(v=>typeof v==='number'?{n:'Player',s:v}:v).filter(v=>v&&Number.isSafeInteger(v.s)&&v.s>=0).sort((a,b)=>b.s-a.s).slice(0,5):[]}catch(e){return[]}},
+  save(a){try{localStorage.setItem(this.key,JSON.stringify(a));return true}catch(e){return false}},
+  submit(name,score){const a=this.load().filter(v=>!(v.n==='Player'&&v.s===score));a.push({n:name,s:score});a.sort((x,y)=>y.s-x.s);return this.save(a.slice(0,5))?this.load():null}};
 const Profile={key:'neonswarm.profile',data:null,
   init(){let saved={};try{saved=JSON.parse(localStorage.getItem(this.key))||{}}catch(e){}
     this.data={credits:Number.isFinite(saved.credits)?Math.max(0,saved.credits):0,unlocked:Array.isArray(saved.unlocked)?saved.unlocked.filter(id=>SKINS.some(s=>s.id===id)):['cyan'],skin:SKINS.some(s=>s.id===saved.skin)?saved.skin:'cyan'};
     if(!this.data.unlocked.includes('cyan'))this.data.unlocked.push('cyan');this.save();this.render()},
-  save(){try{localStorage.setItem(this.key,JSON.stringify(this.data));return true}catch(e){return false}},
+  save(){try{localStorage.setItem(this.key,JSON.stringify(this.data));$('save-status').textContent='Progress saves in this browser for this site address.';return true}catch(e){$('save-status').textContent='Browser storage is unavailable; progress may not persist.';return false}},
   color(){return SKINS.find(s=>s.id===this.data.skin)?.color||COL.cyan},
   render(){const host=$('skins');if(!host)return;host.replaceChildren();
     for(const skin of SKINS){const owned=this.data.unlocked.includes(skin.id),button=document.createElement('button');button.type='button';button.className='skin'+(this.data.skin===skin.id?' selected':'');button.style.setProperty('--swatch',skin.color);button.disabled=!owned&&(skin.winOnly||this.data.credits<skin.cost);button.title=owned?skin.name:skin.winOnly?'Win the campaign to unlock':skin.name+' costs '+skin.cost+' credits';button.setAttribute('aria-label',button.title);button.setAttribute('aria-pressed',String(this.data.skin===skin.id));
@@ -214,7 +243,7 @@ const Input={keys:{},ptr:null,dash:false,
       if(m>8){const f=Math.min(1,m/45)/m;return{x:dx*f,y:dy*f}}}
     return{x:0,y:0}},
   bind(){
-    addEventListener('keydown',e=>{const k=e.code;if(e.target.tagName==='INPUT'){if(k==='Enter'){if(e.target.id==='admin-password')Admin.unlock();else if(e.target.id==='nm')$('sub').click()}return}if(k.startsWith('Arrow')||k==='Space')e.preventDefault();this.keys[k]=true;Sfx.init();
+    addEventListener('keydown',e=>{const k=e.code;if(['snake','game2048','memory'].includes(Game.state)){if(k.startsWith('Arrow'))e.preventDefault();MiniGames.key(k);return}if(e.target.tagName==='INPUT'){if(k==='Enter'){if(e.target.id==='admin-password')Admin.unlock();else if(e.target.id==='nm')$('sub').click()}return}if(k.startsWith('Arrow')||k==='Space')e.preventDefault();this.keys[k]=true;Sfx.init();
       if(k==='Space'||k.startsWith('Shift'))this.dash=true;
       if(k==='KeyP'||k==='Escape')Game.state==='play'?Game.pause():Game.resume();
       if(k==='Enter'&&(Game.state==='menu'||Game.state==='over'))Game.start();
@@ -243,16 +272,16 @@ const Game={state:'menu',time:0,best:0,p:null,
   reset(){Object.assign(this,{score:0,combo:0,comboT:0,mult:1,wave:1,betweenWaves:false,waveDelay:0,xp:0,need:8,lvl:1,timeScale:1,dieT:0,hitT:0,enemies:[],bullets:[],eb:[],gems:[],pu:[],won:false});
     this.p={x:view.w/2,y:view.h*.82,vx:0,vy:0,r:11,hp:200,maxHp:200,fireT:.12,dashT:0,dashCd:0,inv:1,aim:-1.57,face:-1.57,dx:0,dy:-1,dead:false,shield:0,rapid:0};
     FX.parts=[];FX.texts=[];FX.rings=[];FX.shake=0;FX.flash=0},
-  set(s){this.state=s;for(const id of['menu','pause','over','settings','admin-lock','admin'])$(id).classList.toggle('on',id===s);$('pb').style.display=s==='play'?'block':'none';document.body.classList.toggle('playing',s==='play');
+  set(s){this.state=s;for(const id of['menu','pause','over','settings','admin-lock','admin','games','snake','game2048','memory'])$(id).classList.toggle('on',id===s);$('pb').style.display=s==='play'?'block':'none';document.body.classList.toggle('playing',s==='play');
     if(document.activeElement&&document.activeElement.blur)document.activeElement.blur()},
   start(){Sfx.init();Settings.startMusic();Input.dash=false;Input.ptr=null;this.reset();if(Admin.pendingShield){this.p.shield=Admin.pendingShield;Admin.pendingShield=0}this.spawnWave();Sfx.play('start');FX.text(view.w/2,view.h*.3,'Wave 1 / '+MAX_WAVE,COL.cyan,34);this.set('play')},
   pause(){if(this.state==='play'){Input.ptr=null;this.set('pause')}},
   resume(){if(this.state==='pause'){Input.dash=false;this.set('play')}},
   goMenu(){this.p=null;board($('b0'),Store.load(),-1);Net.get().then(s=>s&&board($('b0'),s,-1));this.set('menu')},
-  over(){const list=Store.load(),hi=this.score>0&&this.score>(list[0]||0);
-    list.push(this.score);list.sort((a,b)=>b-a);list.length=Math.min(list.length,5);Store.save(list);this.best=list[0];
+  over(){const list=Store.load(),hi=this.score>0&&this.score>(list[0]?.s||0);
+    const localSaved=this.score>0?Store.submit('Player',this.score):false;this.best=Store.load()[0]?.s||0;
     $('ovt').textContent=this.won?'Campaign complete!':hi?'New best score!':'Signal lost';$('sc').textContent='Score '+this.score.toLocaleString()+', reached wave '+this.wave+' / '+MAX_WAVE;
-    board($('b1'),list,this.score);Sfx.play(hi?'win':'lose');$('sv').hidden=!Net.on||this.score<=0;$('sub').disabled=false;try{$('nm').value=localStorage.getItem('neonswarm.name')||$('nm').value}catch(e){}this.set('over')},
+    board($('b1'),Store.load(),this.score);Sfx.play(hi?'win':'lose');$('sv').hidden=this.score<=0;$('submit-status').textContent=this.score>0?(localSaved?(Net.on?'Saved on this device. Add your name to the shared leaderboard.':'Saved on this device. The shared leaderboard is unavailable.'):'Browser storage is unavailable; try saving to the shared leaderboard.') :'';$('sub').disabled=false;try{$('nm').value=localStorage.getItem('neonswarm.name')||$('nm').value}catch(e){}this.set('over')},
   tick(raw){ // raw = real delta time in seconds (clamped); gameplay uses scaled dt
     if(this.state==='menu'){this.time+=raw;if(Math.random()<.3)FX.burst(rnd(0,view.w),rnd(0,view.h),[COL.cyan,COL.pink,COL.vio][Math.floor(rnd(0,3))],5,50,1.4,2.2);FX.update(raw);return}
     if(this.state==='over'){FX.update(raw);return}
@@ -324,10 +353,10 @@ const Game={state:'menu',time:0,best:0,p:null,
     const kinds=this.wave>=11?Array.from({length:Math.min(30,this.wave+5)},(_,i)=>enemyKinds[(i*3+this.wave)%enemyKinds.length]):formations[this.wave];
     const rows=Math.ceil(kinds.length/cols),rowGap=Math.min(88,(view.h-140)/Math.max(1,rows-1)),startY=Math.max(48,(view.h-rowGap*(rows-1))*.22);
     kinds.forEach((k,i)=>{const row=Math.floor(i/cols),rowKinds=Math.min(cols,kinds.length-row*cols),col=i%cols,gap=Math.min(110,(W-100)/Math.max(1,rowKinds-1));this.add(k,W/2+(col-(rowKinds-1)/2)*gap,startY+row*rowGap)})},
-  awardScore(points){const earned=points*(this.wave>=10?20:1);this.score+=earned;return earned},
+  awardScore(points){const earned=points*50;this.score+=earned;return earned},
   clearWave(){this.betweenWaves=true;this.waveDelay=2;const reward=this.wave*150;this.awardScore(this.wave*250);Profile.reward(this.wave);FX.text(view.w/2,view.h*.32,'WAVE CLEAR  +'+reward+' CREDITS',COL.gold,25)},
   victory(){this.won=true;this.awardScore(2500);Profile.victory();this.over()},
-  damage(e,n){if(e.k==='boss'&&(this.wave===30||this.wave===50||this.wave===MAX_WAVE)){if(this.time<(e.nextHitAt||0))return;e.nextHitAt=this.time+.15;n=Math.min(n,this.wave===MAX_WAVE?10000000:10000)}e.hp-=n;e.flash=.08;if(this.time-this.hitT>.05){this.hitT=this.time;Sfx.play('hit')}if(e.hp<=0&&!e.dead)this.kill(e)},
+  damage(e,n){if(e.k==='boss'&&(this.wave===30||this.wave===50||this.wave===MAX_WAVE)){if(this.time<(e.nextHitAt||0))return;e.nextHitAt=this.time+.15}e.hp-=n;e.flash=.08;if(this.time-this.hitT>.05){this.hitT=this.time;Sfx.play('hit')}if(e.hp<=0&&!e.dead)this.kill(e)},
   kill(e){e.dead=true;const T=TYPES[e.k],old=this.mult;
     this.combo++;this.comboT=2.6;this.mult=Math.min(8,1+Math.floor(this.combo/5));
     const pts=this.awardScore(T.pts*this.mult);
@@ -358,6 +387,28 @@ const Game={state:'menu',time:0,best:0,p:null,
   die(){const p=this.p;p.dead=true;this.state='dying';this.dieT=0;$('pb').style.display='none';
     FX.burst(p.x,p.y,COL.cyan,70,430,1.1,4);FX.hit(18);Sfx.play('boom')}};
 
+const MiniGames={returnTo:'menu',active:null,snakeTimer:null,memoryTimer:null,stats:{snake:0,tile:0,memory:0},
+  init(){try{const saved=JSON.parse(localStorage.getItem('neonswarm.arcade'))||{};this.stats={...this.stats,...saved}}catch(e){}this.renderRecords()},
+  save(){try{localStorage.setItem('neonswarm.arcade',JSON.stringify(this.stats));$('save-status').textContent='Progress and arcade records save in this browser for this site address.';return true}catch(e){$('save-status').textContent='Browser storage is unavailable; progress may not persist.';return false}},
+  record(id,value,lower=false){const old=this.stats[id];if((lower&&(!old||value<old))||(!lower&&value>old)){this.stats[id]=value;this.save()}this.renderRecords()},
+  renderRecords(){$('arcade-records').textContent='Best Snake '+(this.stats.snake||0)+' | 2048 '+(this.stats.tile||0)+' | Memory '+(this.stats.memory||'--')+' moves'},
+  open(from){this.returnTo=from;this.active=null;Game.set('games');this.renderRecords()},
+  showHub(){this.stop();this.active=null;Game.set('games')},
+  exit(){this.stop();this.active=null;Game.set(this.returnTo)},
+  stop(){if(this.snakeTimer){clearInterval(this.snakeTimer);this.snakeTimer=null}if(this.memoryTimer){clearTimeout(this.memoryTimer);this.memoryTimer=null}},
+  launch(id){this.stop();this.active=id;Game.set({snake:'snake',tile:'game2048',memory:'memory'}[id]);if(id==='snake')this.startSnake();else if(id==='tile')this.startTile();else this.startMemory()},
+  key(code){if(code==='Escape'){this.showHub();return}const dirs={ArrowUp:'up',KeyW:'up',ArrowDown:'down',KeyS:'down',ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right'};if(this.active==='snake'&&dirs[code])this.turnSnake(dirs[code]);if(this.active==='tile'&&dirs[code])this.moveTile(dirs[code])},
+  startSnake(){this.active='snake';this.snake={body:[{x:7,y:8},{x:6,y:8},{x:5,y:8}],dir:'right',next:'right',food:{x:11,y:8},score:0,over:false};const host=$('snake-board');host.replaceChildren();for(let i=0;i<256;i++){const cell=document.createElement('div');cell.className='snake-cell';host.append(cell)}this.paintSnake();$('snake-status').textContent='Score 0 | Best '+(this.stats.snake||0);this.snakeTimer=setInterval(()=>this.stepSnake(),125)},
+  turnSnake(dir){const opposite={up:'down',down:'up',left:'right',right:'left'};if(dir!==opposite[this.snake.dir])this.snake.next=dir},
+  stepSnake(){const s=this.snake;if(!s||s.over)return;s.dir=s.next;const delta={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]}[s.dir],head={x:s.body[0].x+delta[0],y:s.body[0].y+delta[1]},eats=head.x===s.food.x&&head.y===s.food.y,limit=eats?s.body.length:s.body.length-1;if(head.x<0||head.y<0||head.x>=16||head.y>=16||s.body.slice(0,limit).some(p=>p.x===head.x&&p.y===head.y)){s.over=true;this.stop();$('snake-status').textContent='Game over | Score '+s.score+' | Best '+(this.stats.snake||0);return}s.body.unshift(head);if(eats){s.score+=10;this.record('snake',s.score);do{s.food={x:Math.floor(Math.random()*16),y:Math.floor(Math.random()*16)}}while(s.body.some(p=>p.x===s.food.x&&p.y===s.food.y))}else s.body.pop();$('snake-status').textContent='Score '+s.score+' | Best '+(this.stats.snake||0);this.paintSnake()},
+  paintSnake(){const cells=$('snake-board').children,s=this.snake;for(const cell of cells)cell.className='snake-cell';for(let i=0;i<s.body.length;i++){const p=s.body[i];cells[p.y*16+p.x].className='snake-cell '+(i===0?'head':'body')}cells[s.food.y*16+s.food.x].className='snake-cell food'},
+  startTile(){this.active='tile';this.tile={board:Array(16).fill(0),score:0};this.spawnTile();this.spawnTile();this.paintTile()},
+  spawnTile(){const empty=this.tile.board.map((v,i)=>v?-1:i).filter(i=>i>=0);if(empty.length)this.tile.board[empty[Math.floor(Math.random()*empty.length)]]=Math.random()<.9?2:4},
+  moveTile(dir){const t=this.tile,before=t.board.join(','),lines=[];for(let n=0;n<4;n++){const line=dir==='left'||dir==='right'?Array.from({length:4},(_,i)=>n*4+(dir==='left'?i:3-i)):Array.from({length:4},(_,i)=>(dir==='up'?i:3-i)*4+n);lines.push(line)}for(const line of lines){const values=line.map(i=>t.board[i]).filter(Boolean),merged=[];for(let i=0;i<values.length;i++){if(values[i]===values[i+1]){merged.push(values[i]*2);t.score+=values[i]*2;i++}else merged.push(values[i])}line.forEach((index,i)=>t.board[index]=merged[i]||0)}if(t.board.join(',')!==before){this.spawnTile();this.record('tile',t.score);this.paintTile()}},
+  paintTile(){const host=$('tile-board');host.replaceChildren();for(const value of this.tile.board){const tile=document.createElement('div');tile.className='tile';tile.textContent=value||'';tile.style.setProperty('--tile-color',value?({2:'#204454',4:'#246b63',8:'#317f57',16:'#96772e',32:'#b64e36',64:'#dc3c68',128:'#7b53aa',256:'#4b62bc',512:'#347da9',1024:'#ce8b2e',2048:'#ffe044'}[value]||'#ef4fbd'):'rgba(255,255,255,.06)');host.append(tile)}$('tile-status').textContent='Score '+this.tile.score+' | Best '+(this.stats.tile||0)+' | Arrow keys or WASD'},
+  startMemory(){this.active='memory';this.memory={cards:[0,1,2,3,4,5,6,7,0,1,2,3,4,5,6,7].sort(()=>Math.random()-.5),open:[],matched:[],moves:0,locked:false};this.paintMemory()},
+  paintMemory(){const host=$('memory-board');host.replaceChildren();this.memory.cards.forEach((value,index)=>{const card=document.createElement('button');card.type='button';card.className='memory-card';card.textContent=this.memory.matched.includes(index)||this.memory.open.includes(index)?String.fromCharCode(65+value):'?';card.setAttribute('aria-label',this.memory.matched.includes(index)||this.memory.open.includes(index)?'Card '+String.fromCharCode(65+value):'Hidden card');card.disabled=this.memory.matched.includes(index)||this.memory.locked;card.onclick=()=>this.flipMemory(index);host.append(card)});$('memory-status').textContent='Moves '+this.memory.moves+' | Best '+(this.stats.memory||'--')+' moves'},
+  flipMemory(index){const m=this.memory;if(m.locked||m.open.includes(index)||m.matched.includes(index))return;m.open.push(index);if(m.open.length===2){m.moves++;const [a,b]=m.open;if(m.cards[a]===m.cards[b]){m.matched.push(a,b);m.open=[];if(m.matched.length===16)this.record('memory',m.moves,true)}else{m.locked=true;this.memoryTimer=setTimeout(()=>{m.open=[];m.locked=false;this.memoryTimer=null;this.paintMemory()},650)}}this.paintMemory()}};
 /* ================= RENDERING ================= */
 function poly(c,x,y,r,n,a){for(let i=0;i<n;i++){const t=a+i*TAU/n,px=x+Math.cos(t)*r,py=y+Math.sin(t)*r;i?c.lineTo(px,py):c.moveTo(px,py)}c.closePath()}
 function draw(){
@@ -412,10 +463,15 @@ addEventListener('resize',resize);
 $('play').onclick=()=>Game.start();$('again').onclick=()=>Game.start();$('resume').onclick=()=>Game.resume();
 $('quit').onclick=()=>Game.goMenu();$('home').onclick=()=>Game.goMenu();$('pb').onclick=()=>Game.pause();
 $('settings-open').onclick=()=>Settings.open('menu');$('settings-pause').onclick=()=>Settings.open('pause');$('settings-close').onclick=()=>Settings.close();
+$('games-open-menu').onclick=()=>MiniGames.open('menu');$('games-open-pause').onclick=()=>MiniGames.open('pause');$('games-back').onclick=()=>MiniGames.exit();document.querySelectorAll('[data-games-back]').forEach(button=>button.onclick=()=>MiniGames.showHub());
+document.querySelectorAll('[data-launch-game]').forEach(button=>button.onclick=()=>MiniGames.launch(button.dataset.launchGame));
+document.querySelectorAll('[data-snake-dir]').forEach(button=>button.onclick=()=>MiniGames.turnSnake(button.dataset.snakeDir));
+document.querySelectorAll('[data-tile-dir]').forEach(button=>button.onclick=()=>MiniGames.moveTile(button.dataset.tileDir));
+$('snake-restart').onclick=()=>MiniGames.launch('snake');$('tile-restart').onclick=()=>MiniGames.launch('tile');$('memory-restart').onclick=()=>MiniGames.launch('memory');
 $('admin-open-menu').onclick=()=>Admin.open('menu');$('admin-open-pause').onclick=()=>Admin.open('pause');
 $('admin-unlock').onclick=()=>Admin.unlock();$('admin-lock-close').onclick=()=>Admin.close();$('admin-close').onclick=()=>Admin.close();
 $('admin-fire-rate').oninput=e=>Admin.setFireRate(e.target.value);
-$('admin-damage').oninput=e=>Admin.setDamage(e.target.value);
+$('admin-damage').onchange=e=>Admin.setDamage(e.target.value);
 $('admin-shield-duration').onchange=e=>Admin.setShieldDuration(e.target.value);
 $('admin-grant-shield').onclick=()=>Admin.grantShield();
 $('music-enabled').onchange=e=>Settings.setMusic(e.target.checked);
@@ -424,9 +480,12 @@ $('effects-volume').oninput=e=>Settings.setEffectsVolume(Number(e.target.value)/
 const Net={on:false, // optional Python leaderboard: only present when served by neon_swarm.py
   async get(){try{const r=await fetch('api/scores');if(!r.ok)throw 0;const j=await r.json();this.on=true;return j.scores}catch(e){this.on=false;return null}},
   async post(n,s){try{const r=await fetch('api/scores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,score:s})});return r.ok?(await r.json()).scores:null}catch(e){return null}}};
-$('sub').onclick=async()=>{const n=$('nm').value.trim().slice(0,12)||'Player';$('sub').disabled=true;try{localStorage.setItem('neonswarm.name',n)}catch(e){}
-  const s=await Net.post(n,Game.score);$('sub').disabled=false;if(s){board($('b1'),s,Game.score);$('sv').hidden=true}};
-Profile.init();Settings.init();Admin.init();Input.bind();resize();Game.best=Store.load()[0]||0;board($('b0'),Store.load(),-1);Net.get().then(s=>s&&board($('b0'),s,-1));requestAnimationFrame(frame);
+$('sub').onclick=async()=>{const n=$('nm').value.trim().slice(0,12)||'Player';$('sub').disabled=true;$('submit-status').textContent='Saving score...';try{localStorage.setItem('neonswarm.name',n)}catch(e){}
+  const local=Store.submit(n,Game.score),shared=await Net.post(n,Game.score);$('sub').disabled=false;$('sv').hidden=true;
+  if(shared){board($('b1'),shared,Game.score);$('submit-status').textContent=local?'Saved to the shared leaderboard.':'Shared score saved; browser storage is unavailable.'}
+  else if(local){board($('b1'),local,Game.score);$('submit-status').textContent='Saved on this device. The shared leaderboard is unavailable.'}
+  else $('submit-status').textContent='Could not save this score. Check browser storage or the server.'};
+Profile.init();Settings.init();Admin.init();MiniGames.init();Input.bind();resize();Game.best=Store.load()[0]?.s||0;board($('b0'),Store.load(),-1);Net.get().then(s=>s&&board($('b0'),s,-1));requestAnimationFrame(frame);
 </script>
 </body>
 </html>
@@ -519,7 +578,7 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(size))
             name = re.sub(r"[^\w -]", "", str(data["name"]))[:12].strip() or "Player"
             score = int(data["score"])
-            if not 0 < score < 10_000_000:
+            if not 0 < score <= 9_007_199_254_740_991:
                 raise ValueError("bad score")
         except (ValueError, KeyError, TypeError, AttributeError):
             return self.send_body(400, '{"error":"bad request"}')
