@@ -16,6 +16,7 @@ import socket
 import sys
 import threading
 import time
+import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -921,17 +922,18 @@ def run_gui(host, start_port):
         fallback.eval("tk::PlaceWindow . center")
         tk.Label(
             fallback,
-            text="Redirecting to the website",
+            text="The embedded game window could not start",
             bg="#0d0524",
             fg="#f4eaff",
-            font=("Segoe UI", 20, "bold"),
-        ).pack(pady=(36, 16))
+            font=("Segoe UI", 17, "bold"),
+        ).pack(pady=(28, 16))
         tk.Label(
             fallback,
-            text="If the game did not open, press this link:",
+            text="Install Microsoft Edge WebView2 Runtime, or open the game in your browser:",
             bg="#0d0524",
             fg="#a592d6",
-            font=("Segoe UI", 11),
+            font=("Segoe UI", 10),
+            wraplength=width - 48,
         ).pack(pady=(0, 10))
         link = tk.Label(
             fallback,
@@ -955,13 +957,29 @@ def run_gui(host, start_port):
             padx=20,
             pady=8,
         ).pack(pady=18)
+        runtime_link = tk.Label(
+            fallback,
+            text="WebView2 Runtime: https://developer.microsoft.com/microsoft-edge/webview2/",
+            bg="#0d0524",
+            fg="#a592d6",
+            cursor="hand2",
+            font=("Segoe UI", 9),
+            wraplength=width - 48,
+        )
+        runtime_link.pack()
+        runtime_link.bind(
+            "<Button-1>",
+            lambda _event: webbrowser.open(
+                "https://developer.microsoft.com/microsoft-edge/webview2/"
+            ),
+        )
         tk.Label(
             fallback,
             text="Close this window to stop the game server.",
             bg="#0d0524",
             fg="#a592d6",
             font=("Segoe UI", 9),
-        ).pack()
+        ).pack(pady=(8, 0))
         fallback.protocol("WM_DELETE_WINDOW", fallback.destroy)
         fallback.mainloop()
 
@@ -978,12 +996,14 @@ def run_gui(host, start_port):
                 height=760,
                 min_size=(640, 480),
             )
-            webview.start(gui="edgechromium", debug=False)
+            # Let pywebview select an available Windows renderer automatically.
+            webview.start(debug=False)
             print("[gui] Game window closed.", flush=True)
         except Exception as exc:
+            traceback.print_exc()
             show_fallback(
                 f"Embedded game window could not start ({type(exc).__name__}: {exc}). "
-                "Showing the clickable website link."
+                f"Open {url} in a browser or install Microsoft Edge WebView2 Runtime."
             )
         finally:
             stop_server()

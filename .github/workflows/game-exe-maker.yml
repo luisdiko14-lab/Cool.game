@@ -37,9 +37,55 @@ jobs:
         run: >-
           python -m PyInstaller --noconfirm --clean --onedir --console
           --collect-all webview
+          --collect-all pythonnet
+          --collect-all clr_loader
+          --hidden-import clr
           --name NeonSwarm
           --add-data "MATADORA (Sped Up).mp3;."
           neon_swarm.py
+
+      - name: Sign the executable when a code-signing certificate is configured
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_CERT_BASE64: ${{ secrets.WINDOWS_CODESIGN_CERT_BASE64 }}
+          WINDOWS_CODESIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_CERT_BASE64)) {
+            Write-Host "No code-signing certificate configured; this build will be unsigned."
+            exit 0
+          }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_CERT_PASSWORD)) {
+            throw "WINDOWS_CODESIGN_CERT_PASSWORD must be configured with the certificate."
+          }
+
+          $sdkBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+          $signtool = Get-ChildItem -Path $sdkBin -Filter signtool.exe -Recurse |
+            Where-Object { $_.FullName -match '\\x64\\signtool.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) {
+            throw "Windows SDK signtool.exe was not found on this runner."
+          }
+
+          $certificate = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          try {
+            [IO.File]::WriteAllBytes(
+              $certificate,
+              [Convert]::FromBase64String($env:WINDOWS_CODESIGN_CERT_BASE64)
+            )
+            & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com `
+              /td SHA256 /f $certificate /p $env:WINDOWS_CODESIGN_CERT_PASSWORD `
+              /d "Neon Swarm" "dist/NeonSwarm/NeonSwarm.exe"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Authenticode signing failed with exit code $LASTEXITCODE."
+            }
+            & $signtool.FullName verify /pa /v "dist/NeonSwarm/NeonSwarm.exe"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Authenticode signature verification failed with exit code $LASTEXITCODE."
+            }
+          } finally {
+            Remove-Item $certificate -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Smoke-test the executable
         shell: pwsh
@@ -93,7 +139,7 @@ jobs:
 
           Run NeonSwarm.exe to open the game in its desktop window.
           The app shows a 10-second loading screen and writes startup and server logs to its console.
-          Microsoft Edge WebView2 Runtime is needed for the embedded game window.
+          The app uses the available Windows renderer. Install Microsoft Edge WebView2 Runtime for best compatibility.
           If the embedded window is unavailable, the app displays a clickable local game link.
           To play from other devices on your Wi-Fi, run NeonSwarm.exe --lan.
           Leaderboard and game save data are stored next to NeonSwarm.exe.
