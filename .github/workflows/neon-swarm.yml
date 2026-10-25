@@ -168,13 +168,15 @@ jobs:
           lfs: true
           submodules: recursive
 
-      - name: Restore leaderboard and state from the previous leg
+      - name: Reset leaderboard before leg 1
+        if: ${{ github.event.inputs.reset_leaderboard == 'true' && matrix.leg == 1 }}
+        run: rm -f neon_swarm_scores.json
+
+      - name: Restore runtime state from the previous leg
         if: ${{ github.event.inputs.reset_leaderboard != 'true' || matrix.leg != 1 }}
         uses: actions/cache/restore@v4
         with:
-          path: |
-            neon_swarm_scores.json
-            .neon-state
+          path: .neon-state
           key: neon-swarm-state-${{ github.run_id }}-leg-${{ matrix.leg }}
           restore-keys: |
             neon-swarm-state-
@@ -735,6 +737,7 @@ jobs:
           exit 0
 
       - name: Run the swarm (supervised, hot-reloading, watched)
+        id: run_swarm
         env:
           LEG: ${{ matrix.leg }}
           LEGS_TOTAL: ${{ needs.plan.outputs.legs }}
@@ -753,14 +756,54 @@ jobs:
           pkill -x cloudflared 2>/dev/null
           exit 0
 
-      - name: Save leaderboard and state for the next leg
+      - name: Save runtime state for the next leg
         if: ${{ always() }}
         uses: actions/cache/save@v4
         with:
-          path: |
-            neon_swarm_scores.json
-            .neon-state
+          path: .neon-state
           key: neon-swarm-state-${{ github.run_id }}-leg-${{ matrix.leg }}
+
+      - name: Publish new leaderboard data
+        if: ${{ always() && !cancelled() && steps.run_swarm.outcome != 'skipped' }}
+        env:
+          BRANCH: ${{ github.ref_name }}
+          LEG: ${{ matrix.leg }}
+        run: |
+          set -euo pipefail
+          git add -- neon_swarm_scores.json
+          if git diff --cached --quiet -- neon_swarm_scores.json; then
+            echo "::notice::No new leaderboard data in leg ${LEG}; repository file is unchanged."
+            echo "- Leaderboard: no new data; repository file unchanged" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: save Neon Swarm leaderboard after leg ${LEG}"
+
+          pushed=false
+          for attempt in 1 2 3; do
+            git fetch --quiet origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+            if ! git rebase "refs/remotes/origin/${BRANCH}"; then
+              git rebase --abort
+              echo "::error::Could not rebase the leaderboard update onto ${BRANCH}; resolve the concurrent change and retry."
+              exit 1
+            fi
+            if git push origin "HEAD:refs/heads/${BRANCH}"; then
+              pushed=true
+              break
+            fi
+            echo "::warning::Leaderboard push attempt ${attempt} failed; retrying after fetching the latest branch."
+            sleep 5
+          done
+          if [ "$pushed" != true ]; then
+            echo "::error::Could not push the leaderboard update after 3 attempts."
+            exit 1
+          fi
+
+          echo "## Leaderboard published" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Leg: ${LEG}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Snapshot every repo file plus logs
         if: ${{ always() }}
