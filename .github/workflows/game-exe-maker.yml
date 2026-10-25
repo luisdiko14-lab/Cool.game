@@ -31,11 +31,12 @@ jobs:
           python-version: "3.12"
 
       - name: Install PyInstaller
-        run: python -m pip install pyinstaller
+        run: python -m pip install pyinstaller pywebview
 
       - name: Build the executable
         run: >-
-          python -m PyInstaller --noconfirm --clean --onefile
+          python -m PyInstaller --noconfirm --clean --onedir --console
+          --collect-all webview
           --name NeonSwarm
           --add-data "MATADORA (Sped Up).mp3;."
           neon_swarm.py
@@ -45,8 +46,9 @@ jobs:
         run: |
           $stdout = Join-Path $env:RUNNER_TEMP "neon-swarm.stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "neon-swarm.stderr.log"
-          $server = Start-Process -FilePath "dist/NeonSwarm.exe" `
-            -ArgumentList @("--no-browser", "--port", "18000") `
+          $exe = "dist/NeonSwarm/NeonSwarm.exe"
+          $server = Start-Process -FilePath $exe `
+            -ArgumentList @("--server", "--no-browser", "--port", "18000") `
             -PassThru -NoNewWindow `
             -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           try {
@@ -85,11 +87,14 @@ jobs:
         run: |
           $package = Join-Path $env:RUNNER_TEMP "neon-swarm-package"
           New-Item -ItemType Directory -Force -Path $package, "downloads" | Out-Null
-          Copy-Item "dist/NeonSwarm.exe" $package
+          Copy-Item "dist/NeonSwarm/*" $package -Recurse -Force
           @"
           Neon Swarm for Windows
 
-          Run NeonSwarm.exe to start the game server. Your browser opens automatically.
+          Run NeonSwarm.exe to open the game in its desktop window.
+          The app shows a 10-second loading screen and writes startup and server logs to its console.
+          Microsoft Edge WebView2 Runtime is needed for the embedded game window.
+          If the embedded window is unavailable, the app displays a clickable local game link.
           To play from other devices on your Wi-Fi, run NeonSwarm.exe --lan.
           Leaderboard and game save data are stored next to NeonSwarm.exe.
           "@ | Set-Content -Encoding utf8 (Join-Path $package "README.txt")

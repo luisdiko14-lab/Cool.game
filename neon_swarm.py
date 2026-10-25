@@ -808,7 +808,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_body(200, '{"ok":true}')
 
     def log_message(self, fmt, *args):
-        pass  # keep the console quiet
+        print(f"[HTTP] {self.client_address[0]} - {fmt % args}", flush=True)
 
 
 def lan_ip():
@@ -820,23 +820,211 @@ def lan_ip():
         return None
 
 
+def create_server(host, start_port):
+    for port in range(start_port, start_port + 20):
+        try:
+            return ThreadingHTTPServer((host, port), Handler), port
+        except OSError:
+            continue
+    raise SystemExit(f"No free port found. Try: python neon_swarm.py --port {start_port + 20}")
+
+
+def run_gui(host, start_port):
+    import tkinter as tk
+
+    server, port = create_server(host, start_port)
+    server_thread = threading.Thread(
+        target=server.serve_forever,
+        name="neon-swarm-server",
+        daemon=True,
+    )
+    server_thread.start()
+    url = f"http://localhost:{port}"
+
+    print("[startup] Neon Swarm desktop launcher starting.", flush=True)
+    print(f"[startup] Game server listening at {url}", flush=True)
+    print(f"[startup] Leaderboard file: {DB}", flush=True)
+    if host == "0.0.0.0":
+        ip = lan_ip()
+        if ip:
+            print(f"[startup] Local network link: http://{ip}:{port}", flush=True)
+
+    root = tk.Tk()
+    root.title("Neon Swarm - Loading")
+    root.configure(bg="#0d0524")
+    root.resizable(False, False)
+    width, height = 500, 360
+    root.geometry(f"{width}x{height}")
+    root.eval("tk::PlaceWindow . center")
+
+    title = tk.Label(
+        root,
+        text="NEON SWARM",
+        bg="#0d0524",
+        fg="#f4eaff",
+        font=("Segoe UI", 24, "bold"),
+    )
+    title.pack(pady=(28, 8))
+    status = tk.StringVar(value="Starting the game server...")
+    tk.Label(
+        root,
+        textvariable=status,
+        bg="#0d0524",
+        fg="#a592d6",
+        font=("Segoe UI", 11),
+    ).pack(pady=(0, 12))
+
+    canvas = tk.Canvas(root, width=112, height=112, bg="#0d0524", highlightthickness=0)
+    canvas.pack()
+    canvas.create_oval(12, 12, 100, 100, outline="#35205b", width=8)
+    progress_arc = canvas.create_arc(
+        12,
+        12,
+        100,
+        100,
+        start=90,
+        extent=0,
+        style="arc",
+        outline="#3df5ff",
+        width=8,
+    )
+    progress_text = canvas.create_text(
+        56,
+        56,
+        text="0%",
+        fill="#f4eaff",
+        font=("Segoe UI", 16, "bold"),
+    )
+    tk.Label(
+        root,
+        text=f"Game address: {url}",
+        bg="#0d0524",
+        fg="#3df5ff",
+        font=("Segoe UI", 10),
+    ).pack(pady=(16, 0))
+
+    started_at = time.monotonic()
+    last_logged_second = -1
+
+    def stop_server():
+        print("[shutdown] Stopping the game server.", flush=True)
+        server.shutdown()
+        server.server_close()
+
+    def show_fallback(message):
+        print(f"[gui] {message}", flush=True)
+        fallback = tk.Tk()
+        fallback.title("Neon Swarm")
+        fallback.configure(bg="#0d0524")
+        fallback.resizable(False, False)
+        fallback.geometry(f"{width}x{height}")
+        fallback.eval("tk::PlaceWindow . center")
+        tk.Label(
+            fallback,
+            text="Redirecting to the website",
+            bg="#0d0524",
+            fg="#f4eaff",
+            font=("Segoe UI", 20, "bold"),
+        ).pack(pady=(36, 16))
+        tk.Label(
+            fallback,
+            text="If the game did not open, press this link:",
+            bg="#0d0524",
+            fg="#a592d6",
+            font=("Segoe UI", 11),
+        ).pack(pady=(0, 10))
+        link = tk.Label(
+            fallback,
+            text=url,
+            bg="#0d0524",
+            fg="#3df5ff",
+            cursor="hand2",
+            font=("Segoe UI", 12, "underline"),
+        )
+        link.pack(pady=4)
+        link.bind("<Button-1>", lambda _event: webbrowser.open(url))
+        tk.Button(
+            fallback,
+            text="Open game",
+            command=lambda: webbrowser.open(url),
+            bg="#17334a",
+            fg="#f4eaff",
+            activebackground="#23516a",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=20,
+            pady=8,
+        ).pack(pady=18)
+        tk.Label(
+            fallback,
+            text="Close this window to stop the game server.",
+            bg="#0d0524",
+            fg="#a592d6",
+            font=("Segoe UI", 9),
+        ).pack()
+        fallback.protocol("WM_DELETE_WINDOW", fallback.destroy)
+        fallback.mainloop()
+
+    def open_game_window():
+        print("[gui] Opening the game in its app window.", flush=True)
+        root.destroy()
+        try:
+            import webview
+
+            webview.create_window(
+                "Neon Swarm",
+                url,
+                width=1100,
+                height=760,
+                min_size=(640, 480),
+            )
+            webview.start(gui="edgechromium", debug=False)
+            print("[gui] Game window closed.", flush=True)
+        except Exception as exc:
+            show_fallback(
+                f"Embedded game window could not start ({type(exc).__name__}: {exc}). "
+                "Showing the clickable website link."
+            )
+        finally:
+            stop_server()
+
+    def update_loading():
+        nonlocal last_logged_second
+        elapsed = time.monotonic() - started_at
+        progress = min(elapsed / 10, 1)
+        canvas.itemconfigure(progress_arc, extent=-360 * progress)
+        canvas.itemconfigure(progress_text, text=f"{int(progress * 100)}%")
+        whole_seconds = min(int(elapsed), 10)
+        if whole_seconds != last_logged_second:
+            last_logged_second = whole_seconds
+            print(f"[loading] {whole_seconds}/10 seconds", flush=True)
+        if elapsed >= 10:
+            status.set("Redirecting to the game window...")
+            print("[loading] 10-second loading complete; redirecting to the game.", flush=True)
+            root.after(500, open_game_window)
+        else:
+            root.after(100, update_loading)
+
+    root.protocol("WM_DELETE_WINDOW", lambda: (root.destroy(), stop_server()))
+    root.after(0, update_loading)
+    root.mainloop()
+
+
 def main():
     ap = argparse.ArgumentParser(description="Neon Swarm game server")
     ap.add_argument("--port", type=int, default=8000, help="first port to try (default 8000)")
     ap.add_argument("--lan", action="store_true", help="listen on your network so phones can play")
     ap.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
+    ap.add_argument("--gui", action="store_true", help="open the desktop game window")
+    ap.add_argument("--server", action="store_true", help="run only the game server")
     args = ap.parse_args()
 
     host = "0.0.0.0" if args.lan else "127.0.0.1"
-    server = None
-    for port in range(args.port, args.port + 20):  # fall back to the next free port
-        try:
-            server = ThreadingHTTPServer((host, port), Handler)
-            break
-        except OSError:
-            continue
-    if server is None:
-        raise SystemExit("No free port found. Try: python neon_swarm.py --port 9000")
+    if not args.server and (args.gui or getattr(sys, "frozen", False)):
+        run_gui(host, args.port)
+        return
+
+    server, port = create_server(host, args.port)
 
     url = f"http://localhost:{port}"
     print("\n  Neon Swarm is running")

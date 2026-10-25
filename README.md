@@ -36,7 +36,7 @@ The server prints the network address to open on your phone. Submitted scores ar
 
 ### Windows executable
 
-The **Game Exe Maker** workflow builds and tests a Windows executable whenever code is pushed, then commits the ZIP package to [`downloads/neon-swarm-windows.zip`](downloads/neon-swarm-windows.zip). You can also start it from the repository's Actions tab with **Run workflow**. The ZIP contains `NeonSwarm.exe` and a short usage note; leaderboard and save data are stored beside the executable.
+The **Game Exe Maker** workflow builds a Windows app and smoke-tests its game server whenever code is pushed, then commits the ZIP package to [`downloads/neon-swarm-windows.zip`](downloads/neon-swarm-windows.zip). You can also start it from the repository's Actions tab with **Run workflow**. Extract the ZIP and run `NeonSwarm.exe`; it shows a 10-second loading screen with terminal logs, then opens the game in an embedded window using Microsoft Edge WebView2 Runtime. If WebView2 is unavailable, the app displays a clickable local game link. The package uses a folder-based build rather than a self-extracting single-file executable, which can reduce false-positive detections but cannot guarantee that Microsoft Defender will not flag it. The app is unsigned; for persistent SmartScreen/Defender warnings, submit the file to Microsoft's false-positive submission portal or distribute a properly code-signed build. Leaderboard and save data are stored beside `NeonSwarm.exe`.
 
 ## Controls
 
