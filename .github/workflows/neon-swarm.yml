@@ -29,6 +29,14 @@ on:
         description: "Legs to chain (about 5.7 h each; 130 is about 31 days)"
         type: number
         default: 130
+      pusher_name:
+        description: "Name to use for saved-data commits"
+        type: string
+        default: "Data Saver"
+      pusher_email:
+        description: "Email to use for saved-data commits"
+        type: string
+        default: "save.data@github.com"
   # Sent by the last leg to start the next chain at GitHub's 35-day run limit.
   repository_dispatch:
     types: [neon-swarm-handoff]
@@ -764,10 +772,12 @@ jobs:
           key: neon-swarm-state-${{ github.run_id }}-leg-${{ matrix.leg }}
 
       - name: Publish new leaderboard data
-        if: ${{ always() && !cancelled() && steps.run_swarm.outcome != 'skipped' }}
+        if: ${{ always() && steps.run_swarm.outcome != 'skipped' }}
         env:
           BRANCH: ${{ github.ref_name }}
           LEG: ${{ matrix.leg }}
+          PUSHER_NAME: ${{ github.event.inputs.pusher_name || 'Data Saver' }}
+          PUSHER_EMAIL: ${{ github.event.inputs.pusher_email || 'save.data@github.com' }}
         run: |
           set -euo pipefail
           for data_file in neon_swarm_scores.json neon_swarm_saves.json; do
@@ -779,8 +789,8 @@ jobs:
             exit 0
           fi
 
-          git config user.name "Data Saver"
-          git config user.email "save.data@github.com"
+          git config user.name "$PUSHER_NAME"
+          git config user.email "$PUSHER_EMAIL"
           git commit -m "chore: save Neon Swarm data after leg ${LEG}"
 
           pushed=false
