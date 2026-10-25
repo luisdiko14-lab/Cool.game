@@ -44,49 +44,6 @@ jobs:
           --add-data "MATADORA (Sped Up).mp3;."
           neon_swarm.py
 
-      - name: Sign the executable when a code-signing certificate is configured
-        shell: pwsh
-        env:
-          WINDOWS_CODESIGN_CERT_BASE64: ${{ secrets.WINDOWS_CODESIGN_CERT_BASE64 }}
-          WINDOWS_CODESIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_CERT_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_CERT_BASE64)) {
-            Write-Host "No code-signing certificate configured; this build will be unsigned."
-            exit 0
-          }
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_CERT_PASSWORD)) {
-            throw "WINDOWS_CODESIGN_CERT_PASSWORD must be configured with the certificate."
-          }
-
-          $sdkBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
-          $signtool = Get-ChildItem -Path $sdkBin -Filter signtool.exe -Recurse |
-            Where-Object { $_.FullName -match '\\x64\\signtool.exe$' } |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-          if (-not $signtool) {
-            throw "Windows SDK signtool.exe was not found on this runner."
-          }
-
-          $certificate = Join-Path $env:RUNNER_TEMP "codesign.pfx"
-          try {
-            [IO.File]::WriteAllBytes(
-              $certificate,
-              [Convert]::FromBase64String($env:WINDOWS_CODESIGN_CERT_BASE64)
-            )
-            & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com `
-              /td SHA256 /f $certificate /p $env:WINDOWS_CODESIGN_CERT_PASSWORD `
-              /d "Neon Swarm" "dist/NeonSwarm/NeonSwarm.exe"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Authenticode signing failed with exit code $LASTEXITCODE."
-            }
-            & $signtool.FullName verify /pa /v "dist/NeonSwarm/NeonSwarm.exe"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Authenticode signature verification failed with exit code $LASTEXITCODE."
-            }
-          } finally {
-            Remove-Item $certificate -Force -ErrorAction SilentlyContinue
-          }
-
       - name: Smoke-test the executable
         shell: pwsh
         run: |
@@ -132,7 +89,8 @@ jobs:
         shell: pwsh
         run: |
           $package = Join-Path $env:RUNNER_TEMP "neon-swarm-package"
-          New-Item -ItemType Directory -Force -Path $package, "downloads" | Out-Null
+          $archive = Join-Path $env:RUNNER_TEMP "neon-swarm-package.zip"
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
           Copy-Item "dist/NeonSwarm/*" $package -Recurse -Force
           @"
           Neon Swarm for Windows
@@ -145,7 +103,60 @@ jobs:
           Leaderboard and game save data are stored next to NeonSwarm.exe.
           "@ | Set-Content -Encoding utf8 (Join-Path $package "README.txt")
           Compress-Archive -Path (Join-Path $package "*") `
-            -DestinationPath "downloads/neon-swarm-windows.zip" -Force
+            -DestinationPath $archive -Force
+
+      - name: Sign executable in ZIP and rebuild package
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_CERT_BASE64: ${{ secrets.WINDOWS_CODESIGN_CERT_BASE64 }}
+          WINDOWS_CODESIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_CERT_PASSWORD }}
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "neon-swarm-package.zip"
+          $package = Join-Path $env:RUNNER_TEMP "neon-swarm-extracted"
+          $outputZip = "downloads/neon-swarm-windows.zip"
+          New-Item -ItemType Directory -Force -Path $package, "downloads" | Out-Null
+          Expand-Archive -Path $archive -DestinationPath $package -Force
+
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_CERT_BASE64)) {
+            Write-Host "No code-signing certificate configured; the packaged executable will be unsigned."
+          } else {
+            if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_CERT_PASSWORD)) {
+              throw "WINDOWS_CODESIGN_CERT_PASSWORD must be configured with the certificate."
+            }
+
+            $certificate = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+            try {
+              [IO.File]::WriteAllBytes(
+                $certificate,
+                [Convert]::FromBase64String($env:WINDOWS_CODESIGN_CERT_BASE64)
+              )
+              $sdkBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+              $signtool = Get-ChildItem -Path $sdkBin -Filter signtool.exe -Recurse |
+                Where-Object { $_.FullName -match '\\x64\\signtool.exe$' } |
+                Sort-Object FullName -Descending |
+                Select-Object -First 1
+              if (-not $signtool) {
+                throw "Windows SDK signtool.exe was not found on this runner."
+              }
+
+              $exe = Join-Path $package "NeonSwarm.exe"
+              & $signtool.FullName sign /fd SHA256 /tr https://timestamp.digicert.com `
+                /td SHA256 /f $certificate /p $env:WINDOWS_CODESIGN_CERT_PASSWORD `
+                /d "Neon Swarm" $exe
+              if ($LASTEXITCODE -ne 0) {
+                throw "Authenticode signing failed with exit code $LASTEXITCODE."
+              }
+              & $signtool.FullName verify /pa /v $exe
+              if ($LASTEXITCODE -ne 0) {
+                throw "Authenticode signature verification failed with exit code $LASTEXITCODE."
+              }
+            } finally {
+              Remove-Item $certificate -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          Compress-Archive -Path (Join-Path $package "*") `
+            -DestinationPath $outputZip -Force
 
       - name: Commit the ZIP package
         shell: pwsh
