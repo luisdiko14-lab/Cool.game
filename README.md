@@ -34,6 +34,10 @@ python3 neon_swarm.py --lan
 
 The server prints the network address to open on your phone. Submitted scores are browser-reported and are not tamper-proof.
 
+### Windows executable
+
+The **Game Exe Maker** workflow builds and tests a Windows executable whenever code is pushed, then commits the ZIP package to [`downloads/neon-swarm-windows.zip`](downloads/neon-swarm-windows.zip). You can also start it from the repository's Actions tab with **Run workflow**. The ZIP contains `NeonSwarm.exe` and a short usage note; leaderboard and save data are stored beside the executable.
+
 ## Controls
 
 | Action | Keyboard | Touch |

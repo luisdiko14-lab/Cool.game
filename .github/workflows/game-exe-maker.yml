@@ -1,0 +1,111 @@
+name: Game Exe Maker
+
+on:
+  push:
+    branches:
+      - "**"
+    paths-ignore:
+      - "downloads/neon-swarm-windows.zip"
+  workflow_dispatch:
+
+concurrency:
+  group: game-exe-maker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and publish Windows ZIP
+    runs-on: windows-latest
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: python -m pip install pyinstaller
+
+      - name: Build the executable
+        run: >-
+          python -m PyInstaller --noconfirm --clean --onefile
+          --name NeonSwarm
+          --add-data "MATADORA (Sped Up).mp3;."
+          neon_swarm.py
+
+      - name: Smoke-test the executable
+        shell: pwsh
+        run: |
+          $stdout = Join-Path $env:RUNNER_TEMP "neon-swarm.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "neon-swarm.stderr.log"
+          $server = Start-Process -FilePath "dist/NeonSwarm.exe" `
+            -ArgumentList @("--no-browser", "--port", "18000") `
+            -PassThru -NoNewWindow `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              if ($server.HasExited) {
+                Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+                throw "NeonSwarm.exe exited before the server became ready."
+              }
+              try {
+                $page = Invoke-WebRequest -Uri "http://127.0.0.1:18000/" -TimeoutSec 2
+                if ($page.StatusCode -eq 200 -and $page.Content.Contains("Neon Swarm")) {
+                  $ready = $true
+                  break
+                }
+              } catch {
+                Start-Sleep -Seconds 1
+              }
+            }
+            if (-not $ready) {
+              Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+              throw "NeonSwarm.exe did not serve the game page."
+            }
+            $audio = Invoke-WebRequest -Uri "http://127.0.0.1:18000/MATADORA%20(Sped%20Up).mp3" -TimeoutSec 10
+            if ($audio.StatusCode -ne 200 -or $audio.RawContentLength -eq 0) {
+              throw "The executable did not serve its bundled audio."
+            }
+          } finally {
+            if (-not $server.HasExited) {
+              Stop-Process -Id $server.Id -Force
+            }
+          }
+
+      - name: Package the executable
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP "neon-swarm-package"
+          New-Item -ItemType Directory -Force -Path $package, "downloads" | Out-Null
+          Copy-Item "dist/NeonSwarm.exe" $package
+          @"
+          Neon Swarm for Windows
+
+          Run NeonSwarm.exe to start the game server. Your browser opens automatically.
+          To play from other devices on your Wi-Fi, run NeonSwarm.exe --lan.
+          Leaderboard and game save data are stored next to NeonSwarm.exe.
+          "@ | Set-Content -Encoding utf8 (Join-Path $package "README.txt")
+          Compress-Archive -Path (Join-Path $package "*") `
+            -DestinationPath "downloads/neon-swarm-windows.zip" -Force
+
+      - name: Commit the ZIP package
+        shell: pwsh
+        run: |
+          git config user.name "Game Exe Maker"
+          git config user.email "create-games@github.com"
+          git add downloads/neon-swarm-windows.zip
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "The generated ZIP is unchanged."
+            exit 0
+          }
+          git commit -m "Build Windows game package"
+          git push origin "HEAD:$env:GITHUB_REF_NAME"

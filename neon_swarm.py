@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 import socket
+import sys
 import threading
 import time
 import webbrowser
@@ -20,8 +21,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-DB = Path(__file__).resolve().with_name("neon_swarm_scores.json")
-SAVES_DB = Path(__file__).resolve().with_name("neon_swarm_saves.json")
+APP_DIR = (
+    Path(sys.executable).resolve().parent
+    if getattr(sys, "frozen", False)
+    else Path(__file__).resolve().parent
+)
+DB = APP_DIR / "neon_swarm_scores.json"
+SAVES_DB = APP_DIR / "neon_swarm_saves.json"
 SAVE_KEYS = {"neonswarm.scores", "neonswarm.profile", "neonswarm.settings", "neonswarm.admin", "neonswarm.arcade"}
 LOCK = threading.Lock()
 LAST_POST = {}  # client ip -> time of last score submission (simple rate limit)
