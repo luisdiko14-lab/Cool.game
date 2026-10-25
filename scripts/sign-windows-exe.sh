@@ -5,7 +5,7 @@ INPUT_EXE="${1:-dist/NeonSwarm/NeonSwarm.exe}"
 OUTPUT_EXE="${2:-$INPUT_EXE}"
 CERTIFICATE="${WINDOWS_CODESIGN_CERT:-}"
 PASSWORD="${WINDOWS_CODESIGN_CERT_PASSWORD:-}"
-TIMESTAMP_URL="${TIMESTAMP_URL:-https://timestamp.digicert.com}"
+TIMESTAMP_URL="${TIMESTAMP_URL:-http://timestamp.digicert.com}"
 SIGNTOOL_PATH="${SIGNTOOL_PATH:-}"
 
 if [[ $# -gt 2 ]]; then

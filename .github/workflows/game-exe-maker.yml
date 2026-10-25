@@ -140,7 +140,7 @@ jobs:
               }
 
               $exe = Join-Path $package "NeonSwarm.exe"
-              & $signtool.FullName sign /fd SHA256 /tr https://timestamp.digicert.com `
+              & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com `
                 /td SHA256 /f $certificate /p $env:WINDOWS_CODESIGN_CERT_PASSWORD `
                 /d "Neon Swarm" $exe
               if ($LASTEXITCODE -ne 0) {
