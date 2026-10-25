@@ -9,6 +9,7 @@ server adds a shared leaderboard saved next to this file in neon_swarm_scores.js
 Scores are reported by the browser, so treat the leaderboard as friendly, not tamper-proof.
 """
 import argparse
+import hashlib
 import json
 import re
 import socket
@@ -17,11 +18,14 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 DB = Path(__file__).resolve().with_name("neon_swarm_scores.json")
+SAVES_DB = Path(__file__).resolve().with_name("neon_swarm_saves.json")
+SAVE_KEYS = {"neonswarm.scores", "neonswarm.profile", "neonswarm.settings", "neonswarm.admin", "neonswarm.arcade"}
 LOCK = threading.Lock()
 LAST_POST = {}  # client ip -> time of last score submission (simple rate limit)
+LAST_SAVE_POST = {}
 
 # ---------------------------------------------------------------- the game ---
 GAME_HTML = r'''<!DOCTYPE html>
@@ -142,16 +146,25 @@ const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const cv=$('c'),ctx=cv.getContext('2d');
 let view={cw:1,ch:1,dpr:1,s:1,w:VIEW,h:VIEW},bg;
 
+const SavedData={keys:['neonswarm.scores','neonswarm.profile','neonswarm.settings','neonswarm.admin','neonswarm.arcade'],id:null,timer:null,
+  async init(){try{this.id=localStorage.getItem('neonswarm.save-id');if(!/^[a-f0-9]{32}$/.test(this.id||'')){this.id=crypto.randomUUID().replace(/-/g,'');localStorage.setItem('neonswarm.save-id',this.id)}}catch(e){return}
+    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),4000);
+    try{const response=await fetch('/api/saves',{headers:{'X-Save-Token':this.id},signal:controller.signal});if(!response.ok)return;const result=await response.json();for(const key of this.keys)if(localStorage.getItem(key)===null&&result.data&&result.data[key]!==undefined)localStorage.setItem(key,JSON.stringify(result.data[key]))}catch(e){}finally{clearTimeout(timeout)}},
+  schedule(){if(!this.id)return;clearTimeout(this.timer);this.timer=setTimeout(()=>this.push(),1500)},
+  async push(){const data={};for(const key of this.keys){try{const value=localStorage.getItem(key);if(value!==null)data[key]=JSON.parse(value)}catch(e){}}
+    try{const response=await fetch('/api/saves',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:this.id,data})});if(response.ok)$('save-status').textContent='Progress saved in this browser; repository backup is queued for this workflow leg.';else $('save-status').textContent='Progress is saved in this browser; server backup failed.'}catch(e){$('save-status').textContent='Progress is saved in this browser; server backup is unavailable.'}},
+};
+
 /* ================= STORAGE (top 5 scores) ================= */
 const Store={key:'neonswarm.scores',
   load(){try{const a=JSON.parse(localStorage.getItem(this.key));return Array.isArray(a)?a.map(v=>typeof v==='number'?{n:'Player',s:v}:v).filter(v=>v&&Number.isSafeInteger(v.s)&&v.s>=0).sort((a,b)=>b.s-a.s).slice(0,5):[]}catch(e){return[]}},
-  save(a){try{localStorage.setItem(this.key,JSON.stringify(a));return true}catch(e){return false}},
+  save(a){try{localStorage.setItem(this.key,JSON.stringify(a));SavedData.schedule();return true}catch(e){return false}},
   submit(name,score){const a=this.load().filter(v=>!(v.n==='Player'&&v.s===score));a.push({n:name,s:score});a.sort((x,y)=>y.s-x.s);return this.save(a.slice(0,5))?this.load():null}};
 const Profile={key:'neonswarm.profile',data:null,
   init(){let saved={};try{saved=JSON.parse(localStorage.getItem(this.key))||{}}catch(e){}
     this.data={credits:Number.isFinite(saved.credits)?Math.max(0,saved.credits):0,unlocked:Array.isArray(saved.unlocked)?saved.unlocked.filter(id=>SKINS.some(s=>s.id===id)):['cyan'],skin:SKINS.some(s=>s.id===saved.skin)?saved.skin:'cyan'};
     if(!this.data.unlocked.includes('cyan'))this.data.unlocked.push('cyan');this.save();this.render()},
-  save(){try{localStorage.setItem(this.key,JSON.stringify(this.data));$('save-status').textContent='Progress saves in this browser for this site address.';return true}catch(e){$('save-status').textContent='Browser storage is unavailable; progress may not persist.';return false}},
+  save(){try{localStorage.setItem(this.key,JSON.stringify(this.data));$('save-status').textContent='Progress saves in this browser for this site address.';SavedData.schedule();return true}catch(e){$('save-status').textContent='Browser storage is unavailable; progress may not persist.';return false}},
   color(){return SKINS.find(s=>s.id===this.data.skin)?.color||COL.cyan},
   render(){const host=$('skins');if(!host)return;host.replaceChildren();
     for(const skin of SKINS){const owned=this.data.unlocked.includes(skin.id),button=document.createElement('button');button.type='button';button.className='skin'+(this.data.skin===skin.id?' selected':'');button.style.setProperty('--swatch',skin.color);button.disabled=!owned&&(skin.winOnly||this.data.credits<skin.cost);button.title=owned?skin.name:skin.winOnly?'Win the campaign to unlock':skin.name+' costs '+skin.cost+' credits';button.setAttribute('aria-label',button.title);button.setAttribute('aria-pressed',String(this.data.skin===skin.id));
@@ -194,7 +207,7 @@ const Settings={key:'neonswarm.settings',data:{music:true,musicVolume:.35,effect
   init(){let saved={};try{saved=JSON.parse(localStorage.getItem(this.key))||{}}catch(e){}
     this.data={music:saved.music!==false,musicVolume:clamp(Number(saved.musicVolume??.35),0,1),effectsVolume:clamp(Number(saved.effectsVolume??.65),0,1)};
     this.audio=$('bg-music');$('music-enabled').checked=this.data.music;$('music-volume').value=Math.round(this.data.musicVolume*100);$('effects-volume').value=Math.round(this.data.effectsVolume*100);this.apply()},
-  save(){try{localStorage.setItem(this.key,JSON.stringify(this.data))}catch(e){}},
+  save(){try{localStorage.setItem(this.key,JSON.stringify(this.data));SavedData.schedule()}catch(e){}},
   apply(){this.audio.volume=this.data.musicVolume;this.audio.muted=!this.data.music;Sfx.setVolume(this.data.effectsVolume)},
   startMusic(){if(!this.data.music||this.data.musicVolume<=0)return;this.audio.play().catch(()=>{})},
   setMusic(enabled){this.data.music=enabled;this.save();this.apply();if(enabled)this.startMusic();else this.audio.pause()},
@@ -205,7 +218,7 @@ const Settings={key:'neonswarm.settings',data:{music:true,musicVolume:.35,effect
 const Admin={password:'12345678',key:'neonswarm.admin',config:{fireRate:10,damage:500,shieldDuration:10},unlocked:false,pendingShield:0,returnTo:'menu',
   init(){let saved={};try{saved=JSON.parse(localStorage.getItem(this.key))||{}}catch(e){}
     this.config={fireRate:clamp(Number(saved.fireRate)||10,1,50),damage:clamp(Number(saved.damage)||500,1,10000000),shieldDuration:clamp(Number(saved.shieldDuration)||10,1,100)};this.render()},
-  save(){try{localStorage.setItem(this.key,JSON.stringify(this.config))}catch(e){}},
+  save(){try{localStorage.setItem(this.key,JSON.stringify(this.config));SavedData.schedule()}catch(e){}},
   render(){$('admin-fire-rate').value=this.config.fireRate;$('admin-fire-rate-value').textContent=this.config.fireRate;$('admin-damage').value=this.config.damage;$('admin-damage-value').textContent=this.config.damage;$('admin-shield-duration').value=this.config.shieldDuration},
   open(from){this.returnTo=from;$('admin-lock-status').textContent='';$('admin-password').value='';Game.set(this.unlocked?'admin':'admin-lock')},
   unlock(){if($('admin-password').value!==this.password){$('admin-lock-status').textContent='Incorrect password.';return}this.unlocked=true;$('admin-lock-status').textContent='Admin commands unlocked for this session.';this.render();Game.set('admin')},
@@ -389,7 +402,7 @@ const Game={state:'menu',time:0,best:0,p:null,
 
 const MiniGames={returnTo:'menu',active:null,snakeTimer:null,memoryTimer:null,stats:{snake:0,tile:0,memory:0},
   init(){try{const saved=JSON.parse(localStorage.getItem('neonswarm.arcade'))||{};this.stats={...this.stats,...saved}}catch(e){}this.renderRecords()},
-  save(){try{localStorage.setItem('neonswarm.arcade',JSON.stringify(this.stats));$('save-status').textContent='Progress and arcade records save in this browser for this site address.';return true}catch(e){$('save-status').textContent='Browser storage is unavailable; progress may not persist.';return false}},
+  save(){try{localStorage.setItem('neonswarm.arcade',JSON.stringify(this.stats));$('save-status').textContent='Progress and arcade records save in this browser for this site address.';SavedData.schedule();return true}catch(e){$('save-status').textContent='Browser storage is unavailable; progress may not persist.';return false}},
   record(id,value,lower=false){const old=this.stats[id];if((lower&&(!old||value<old))||(!lower&&value>old)){this.stats[id]=value;this.save()}this.renderRecords()},
   renderRecords(){$('arcade-records').textContent='Best Snake '+(this.stats.snake||0)+' | 2048 '+(this.stats.tile||0)+' | Memory '+(this.stats.memory||'--')+' moves'},
   open(from){this.returnTo=from;this.active=null;Game.set('games');this.renderRecords()},
@@ -485,7 +498,7 @@ $('sub').onclick=async()=>{const n=$('nm').value.trim().slice(0,12)||'Player';$(
   if(shared){board($('b1'),shared,Game.score);$('submit-status').textContent=local?'Saved to the shared leaderboard.':'Shared score saved; browser storage is unavailable.'}
   else if(local){board($('b1'),local,Game.score);$('submit-status').textContent='Saved on this device. The shared leaderboard is unavailable.'}
   else $('submit-status').textContent='Could not save this score. Check browser storage or the server.'};
-Profile.init();Settings.init();Admin.init();MiniGames.init();Input.bind();resize();Game.best=Store.load()[0]?.s||0;board($('b0'),Store.load(),-1);Net.get().then(s=>s&&board($('b0'),s,-1));requestAnimationFrame(frame);
+SavedData.init().finally(()=>{Profile.init();Settings.init();Admin.init();MiniGames.init();Input.bind();resize();Game.best=Store.load()[0]?.s||0;board($('b0'),Store.load(),-1);Net.get().then(s=>s&&board($('b0'),s,-1));requestAnimationFrame(frame)});
 </script>
 </body>
 </html>
@@ -505,6 +518,22 @@ def save_scores(rows):
     tmp = DB.with_suffix(".tmp")
     tmp.write_text(json.dumps(rows), encoding="utf-8")
     tmp.replace(DB)  # atomic swap so a crash never leaves a half-written file
+
+
+def load_saves():
+    try:
+        rows = json.loads(SAVES_DB.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    if not isinstance(rows, dict):
+        raise ValueError("saved data file must contain an object")
+    return rows
+
+
+def save_saves(rows):
+    tmp = SAVES_DB.with_suffix(".tmp")
+    tmp.write_text(json.dumps(rows), encoding="utf-8")
+    tmp.replace(SAVES_DB)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -551,11 +580,18 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(chunk)
 
     def do_GET(self):
-        path = unquote(self.path.split("?")[0])
+        parsed = urlsplit(self.path)
+        path = unquote(parsed.path)
         if path in ("/", "/index.html"):
             self.send_body(200, GAME_HTML, "text/html")
         elif path == "/api/scores":
             self.send_body(200, json.dumps({"scores": load_scores()}))
+        elif path == "/api/saves":
+            token = self.headers.get("X-Save-Token", "")
+            if not re.fullmatch(r"[a-f0-9]{32}", token):
+                return self.send_body(400, '{"error":"bad save token"}')
+            save_id = hashlib.sha256(token.encode("ascii")).hexdigest()
+            self.send_body(200, json.dumps({"data": load_saves().get(save_id, {})}))
         elif path == "/MATADORA (Sped Up).mp3":
             try:
                 audio_path = Path(__file__).resolve().with_name("MATADORA (Sped Up).mp3")
@@ -566,7 +602,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_body(404, '{"error":"not found"}')
 
     def do_POST(self):
-        if self.path.split("?")[0] != "/api/scores":
+        path = urlsplit(self.path).path
+        if path == "/api/saves":
+            return self.save_browser_data()
+        if path != "/api/scores":
             return self.send_body(404, '{"error":"not found"}')
         ip, now = self.client_address[0], time.time()
         if now - LAST_POST.get(ip, 0) < 3:
@@ -589,6 +628,39 @@ class Handler(BaseHTTPRequestHandler):
             rows = sorted(rows, key=lambda r: -int(r.get("s", 0)))[:10]
             save_scores(rows)
         self.send_body(200, json.dumps({"scores": rows}))
+
+    def save_browser_data(self):
+        ip, now = self.client_address[0], time.time()
+        if now - LAST_SAVE_POST.get(ip, 0) < 1:
+            return self.send_body(429, '{"error":"slow down"}')
+        try:
+            size = int(self.headers.get("Content-Length", 0))
+            if not 0 < size <= 8192:
+                raise ValueError("bad size")
+            payload = json.loads(self.rfile.read(size))
+            token, data = payload["token"], payload["data"]
+            if not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{32}", token):
+                raise ValueError("bad save token")
+            save_id = hashlib.sha256(token.encode("ascii")).hexdigest()
+            if not isinstance(data, dict) or not set(data).issubset(SAVE_KEYS):
+                raise ValueError("bad save data")
+            if any(not isinstance(value, (dict, list)) for value in data.values()):
+                raise ValueError("bad save value")
+            if any(len(json.dumps(value)) > 4096 for value in data.values()):
+                raise ValueError("save value too large")
+        except (ValueError, KeyError, TypeError, AttributeError):
+            return self.send_body(400, '{"error":"bad request"}')
+        LAST_SAVE_POST[ip] = now
+        try:
+            with LOCK:
+                rows = load_saves()
+                if save_id not in rows and len(rows) >= 1000:
+                    return self.send_body(503, '{"error":"save capacity reached"}')
+                rows[save_id] = data
+                save_saves(rows)
+        except (OSError, ValueError):
+            return self.send_body(500, '{"error":"could not save data"}')
+        self.send_body(200, '{"ok":true}')
 
     def log_message(self, fmt, *args):
         pass  # keep the console quiet

@@ -770,38 +770,40 @@ jobs:
           LEG: ${{ matrix.leg }}
         run: |
           set -euo pipefail
-          git add -- neon_swarm_scores.json
-          if git diff --cached --quiet -- neon_swarm_scores.json; then
-            echo "::notice::No new leaderboard data in leg ${LEG}; repository file is unchanged."
-            echo "- Leaderboard: no new data; repository file unchanged" >> "$GITHUB_STEP_SUMMARY"
+          for data_file in neon_swarm_scores.json neon_swarm_saves.json; do
+            if [ -f "$data_file" ]; then git add -- "$data_file"; fi
+          done
+          if git diff --cached --quiet -- neon_swarm_scores.json neon_swarm_saves.json; then
+            echo "::notice::No new saved data in leg ${LEG}; repository files are unchanged."
+            echo "- Saved data: no changes; repository files unchanged" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: save Neon Swarm leaderboard after leg ${LEG}"
+          git config user.name "Data Saver"
+          git config user.email "save.data@github.com"
+          git commit -m "chore: save Neon Swarm data after leg ${LEG}"
 
           pushed=false
           for attempt in 1 2 3; do
             git fetch --quiet origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
             if ! git rebase "refs/remotes/origin/${BRANCH}"; then
               git rebase --abort
-              echo "::error::Could not rebase the leaderboard update onto ${BRANCH}; resolve the concurrent change and retry."
+              echo "::error::Could not rebase the saved data update onto ${BRANCH}; resolve the concurrent change and retry."
               exit 1
             fi
             if git push origin "HEAD:refs/heads/${BRANCH}"; then
               pushed=true
               break
             fi
-            echo "::warning::Leaderboard push attempt ${attempt} failed; retrying after fetching the latest branch."
+            echo "::warning::Saved data push attempt ${attempt} failed; retrying after fetching the latest branch."
             sleep 5
           done
           if [ "$pushed" != true ]; then
-            echo "::error::Could not push the leaderboard update after 3 attempts."
+            echo "::error::Could not push saved data after 3 attempts."
             exit 1
           fi
 
-          echo "## Leaderboard published" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Saved data published" >> "$GITHUB_STEP_SUMMARY"
           echo "- Leg: ${LEG}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Commit: $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
 
