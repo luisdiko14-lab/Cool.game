@@ -20,7 +20,9 @@ import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import URLError
 from urllib.parse import unquote, urlsplit
+from urllib.request import urlopen
 
 APP_DIR = (
     Path(sys.executable).resolve().parent
@@ -156,7 +158,7 @@ body.low-pixels canvas{image-rendering:pixelated}
 <section class="panel" id="settings"><h2>Settings</h2><label class="setting-row"><span>Music</span><input id="music-enabled" type="checkbox"></label><label class="setting-row"><span>Music volume</span><input id="music-volume" type="range" min="0" max="100" value="35"></label><label class="setting-row"><span>Effects volume</span><input id="effects-volume" type="range" min="0" max="100" value="65"></label><label class="setting-row"><span>Frame cap <output id="fps-cap-value">60</output> FPS</span><input id="fps-cap" type="range" min="20" max="1000" step="10" value="60"></label><label class="setting-row"><span>FPS counter</span><input id="fps-visible" type="checkbox"></label><label class="setting-row"><span>Resolution quality</span><select id="resolution"><option value="240">240p - Low (no FX/music)</option><option value="340">340p - Low (no FX/music)</option><option value="480">480p</option><option value="720">720p</option><option value="1080">1080p</option><option value="1440">1440p (2K HD)</option><option value="2160">2160p (4K Ultra HD)</option><option value="4320">4320p (8K Ultra HD+)</option></select></label><p>FPS is limited by your display/browser. Resolution changes in-game rendering quality, not your monitor, and may be capped by device memory.</p><button class="alt" id="settings-close" type="button">Done</button></section>
 <section class="panel" id="shop"><h2>Hangar shop</h2><p id="shop-balance"></p><p>Earn credits by clearing waves. Buy a ship, then equip it here or from the quick-select row.</p><div class="shop-grid" id="shop-grid"></div><button class="alt" id="shop-close" type="button">Back</button></section>
 <section class="panel" id="admin-lock"><h2>Admin Access</h2><label class="setting-row"><span>Password</span><input id="admin-password" type="password" inputmode="numeric" autocomplete="off" maxlength="16"></label><p id="admin-lock-status" role="status" aria-live="polite"></p><button id="admin-unlock" type="button">Unlock</button><button class="alt" id="admin-lock-close" type="button">Back</button></section>
-<section class="panel" id="admin"><h2>Admin Commands</h2><p>Local gameplay overrides. These controls are not secure server administration.</p><label class="setting-row"><span>Shield duration (seconds)</span><input id="admin-shield-duration" type="number" min="1" max="100" step="1" value="10"></label><button id="admin-grant-shield" type="button">Grant shield</button><label class="setting-row"><span>Fire rate <output id="admin-fire-rate-value">10</output> shots/sec</span><input id="admin-fire-rate" type="range" min="1" max="50" step="1" value="10"></label><label class="setting-row"><span>Damage per shot <output id="admin-damage-value">500</output></span><input id="admin-damage" type="number" min="1" max="10000000" step="1" value="500"></label><p id="admin-status" role="status" aria-live="polite"></p><button class="alt" id="admin-close" type="button">Done</button></section>
+<section class="panel" id="admin"><h2>Admin Commands</h2><p>Local gameplay overrides. These controls are not secure server administration.</p><label class="setting-row"><span>Shield duration (seconds)</span><input id="admin-shield-duration" type="number" min="1" max="100" step="1" value="10"></label><button id="admin-grant-shield" type="button">Grant shield</button><label class="setting-row"><span>Fire rate <output id="admin-fire-rate-value">10</output> shots/sec</span><input id="admin-fire-rate" type="range" min="1" max="50" step="1" value="10"></label><label class="setting-row"><span>Damage per shot <output id="admin-damage-value">500</output></span><input id="admin-damage" type="number" min="1" max="10000000" step="1" value="500"></label><label class="setting-row"><span>XP multi (max 10,000x)</span><input id="admin-xp-multiplier" type="number" min="1" max="10000" step="1" value="1"></label><p id="admin-status" role="status" aria-live="polite"></p><button class="alt" id="admin-close" type="button">Done</button></section>
 <section class="panel" id="admin"><h2>Admin Commands</h2><p>Local gameplay overrides. These controls are not secure server administration.</p><label class="setting-row"><span>Shield duration (seconds)</span><input id="admin-shield-duration" type="number" min="1" max="100" step="1" value="10"></label><button id="admin-grant-shield" type="button">Grant shield</button><label class="setting-row"><span>Fire rate <output id="admin-fire-rate-value">10</output> shots/sec</span><input id="admin-fire-rate" type="range" min="1" max="50" step="1" value="10"></label><label class="setting-row"><span>Damage per shot <output id="admin-damage-value">500</output></span><input id="admin-damage" type="number" min="1" max="10000000" step="1" value="500"></label><p id="admin-status" role="status" aria-live="polite"></p><button class="alt" id="admin-close" type="button">Done</button></section>
 <section class="panel" id="games"><h2>Other games!</h2><p id="arcade-records">Best scores save in this browser.</p><div class="arcade-grid"><button class="arcade-game" data-launch-game="snake">Snake<small>Eat, grow, don't collide</small></button><button class="arcade-game" data-launch-game="tile">2048<small>Join tiles to reach 2048</small></button><button class="arcade-game" data-launch-game="memory">Memory<small>Match all eight pairs</small></button><button class="arcade-game" data-launch-game="racer">Neon Racer 3D<small>Dodge traffic on a neon highway</small></button></div><button class="alt" id="games-back" type="button">Back</button></section>
 <section class="panel" id="snake"><h2>Snake</h2><p id="snake-status" role="status" aria-live="polite"></p><div id="snake-board" class="arcade-board snake-board" aria-label="Snake game board"></div><div class="direction-pad"><button data-snake-dir="up">UP</button><button data-snake-dir="left">LEFT</button><button data-snake-dir="down">DOWN</button><button data-snake-dir="right">RIGHT</button></div><div class="arcade-actions"><button class="alt" id="snake-restart" type="button">Restart</button><button class="alt" data-games-back type="button">Other games</button></div></section>
@@ -284,16 +286,17 @@ const Settings={key:'neonswarm.settings',data:{music:true,musicVolume:.35,effect
   setResolution(value){const resolution=Number(value);if(!RESOLUTIONS.includes(resolution))return;this.data.resolution=resolution;this.save();this.apply();resize();if(resolution<=340)this.audio.pause();else if(this.data.music)this.startMusic()},
   open(from){this.returnTo=from;Game.set('settings')},
   close(){Game.set(this.returnTo)}};
-const Admin={password:'12345678',key:'neonswarm.admin',config:{fireRate:10,damage:500,shieldDuration:10},unlocked:false,pendingShield:0,returnTo:'menu',
+const Admin={password:'12345678',key:'neonswarm.admin',config:{fireRate:10,damage:500,shieldDuration:10,xpMultiplier:1},unlocked:false,pendingShield:0,returnTo:'menu',
   init(){let saved={};try{saved=JSON.parse(localStorage.getItem(this.key))||{}}catch(e){}
-    this.config={fireRate:clamp(Number(saved.fireRate)||10,1,50),damage:clamp(Number(saved.damage)||500,1,10000000),shieldDuration:clamp(Number(saved.shieldDuration)||10,1,100)};this.render()},
+    this.config={fireRate:clamp(Number(saved.fireRate)||10,1,50),damage:clamp(Number(saved.damage)||500,1,10000000),shieldDuration:clamp(Number(saved.shieldDuration)||10,1,100),xpMultiplier:clamp(Math.round(Number(saved.xpMultiplier)||1),1,10000)};this.render()},
   save(){try{localStorage.setItem(this.key,JSON.stringify(this.config));SavedData.schedule()}catch(e){}},
-  render(){$('admin-fire-rate').value=this.config.fireRate;$('admin-fire-rate-value').textContent=this.config.fireRate;$('admin-damage').value=this.config.damage;$('admin-damage-value').textContent=this.config.damage;$('admin-shield-duration').value=this.config.shieldDuration},
+  render(){$('admin-fire-rate').value=this.config.fireRate;$('admin-fire-rate-value').textContent=this.config.fireRate;$('admin-damage').value=this.config.damage;$('admin-damage-value').textContent=this.config.damage;$('admin-shield-duration').value=this.config.shieldDuration;$('admin-xp-multiplier').value=this.config.xpMultiplier},
   open(from){this.returnTo=from;$('admin-lock-status').textContent='';$('admin-password').value='';Game.set(this.unlocked?'admin':'admin-lock')},
-  unlock(){if($('admin-password').value!==this.password){$('admin-lock-status').textContent='Incorrect password.';return}this.unlocked=true;$('admin-lock-status').textContent='Admin commands unlocked for this session.';this.render();Game.set('admin')},
+  unlock(){if($('admin-password').value!==this.password){$('admin-lock-status').textContent='Incorrect password.';return}this.unlocked=true;if(Game.p)Game.refreshMultiplier();$('admin-lock-status').textContent='Admin commands unlocked for this session.';this.render();Game.set('admin')},
   close(){Game.set(this.returnTo)},
   setFireRate(value){this.config.fireRate=clamp(Math.round(Number(value)||1),1,50);this.save();this.render()},
   setDamage(value){this.config.damage=clamp(Math.round(Number(value)||1),1,10000000);this.save();this.render()},
+  setXpMultiplier(value){this.config.xpMultiplier=clamp(Math.round(Number(value)||1),1,10000);this.save();this.render();if(Game.p)Game.refreshMultiplier()},
   setShieldDuration(value){this.config.shieldDuration=clamp(Math.round(Number(value)||1),1,100);this.save();this.render()},
   grantShield(){const duration=clamp(Number($('admin-shield-duration').value)||this.config.shieldDuration,1,100);this.setShieldDuration(duration);if(Game.p)Game.p.shield=Math.max(Game.p.shield,duration);else this.pendingShield=duration;$('admin-status').textContent=Game.p?'Shield granted for '+duration+' seconds.':'Shield queued for the next run ('+duration+' seconds).'}};
 
@@ -355,7 +358,7 @@ const Input={keys:{},ptr:null,dash:false,
 
 /* ================= GAME STATE & RULES ================= */
 const Game={state:'menu',time:0,best:0,p:null,
-  reset(){Object.assign(this,{score:0,combo:0,comboT:0,mult:1,wave:1,betweenWaves:false,waveDelay:0,xp:0,need:8,lvl:1,timeScale:1,dieT:0,hitT:0,enemies:[],bullets:[],eb:[],gems:[],pu:[],won:false});
+  reset(){Object.assign(this,{score:0,combo:0,comboT:0,mult:1,wave:1,betweenWaves:false,waveDelay:0,xp:0,totalXp:0,need:8,lvl:1,timeScale:1,dieT:0,hitT:0,enemies:[],bullets:[],eb:[],gems:[],pu:[],won:false});this.refreshMultiplier();
     this.p={x:view.w/2,y:view.h*.82,vx:0,vy:0,r:11,hp:200,maxHp:200,fireT:.12,dashT:0,dashCd:0,inv:1,aim:-1.57,face:-1.57,dx:0,dy:-1,dead:false,shield:0,rapid:0};
     FX.parts=[];FX.texts=[];FX.rings=[];FX.shake=0;FX.flash=0},
   set(s){this.state=s;for(const id of['menu','pause','over','settings','shop','admin-lock','admin','games','snake','game2048','memory','racer'])$(id).classList.toggle('on',id===s);$('pb').style.display=s==='play'?'block':'none';document.body.classList.toggle('playing',s==='play');
@@ -381,13 +384,16 @@ const Game={state:'menu',time:0,best:0,p:null,
     if(!dying){
       if(this.betweenWaves&&(this.waveDelay-=dt)<=0){if(this.wave>=MAX_WAVE){this.victory();return}this.wave++;this.betweenWaves=false;this.spawnWave();FX.text(W/2,H*.3,'Wave '+this.wave+' / '+MAX_WAVE,COL.cyan,34);Sfx.play('up')}
       this.control(dt)}
-    if(this.comboT>0&&(this.comboT-=dt)<=0){this.combo=0;this.mult=1}
+    if(this.comboT>0&&(this.comboT-=dt)<=0){this.combo=0;this.refreshMultiplier()}
     for(const e of this.enemies){const dx=p.x-e.x,dy=p.y-e.y,a=Math.atan2(dy,dx);e.flash-=dt;e.ang+=dt*(e.k==='tank'?1:3);if(dying||!this.onScreen(e))continue;
       if(e.k==='boss'){const bossDamage=this.wave>=50?250:this.wave>=30?100:10;e.t+=dt;e.sa+=dt*.9;if((e.fireT-=dt)<=0){e.fireT=.2;for(let i=0;i<3;i++){const shot=e.sa+i*TAU/3;this.eb.push({x:e.x,y:e.y,vx:Math.cos(shot)*205,vy:Math.sin(shot)*205,life:6,damage:bossDamage})}}if(e.t>2.6){e.t=0;for(let i=-4;i<=4;i++){const shot=a+i*.13;this.eb.push({x:e.x,y:e.y,vx:Math.cos(shot)*265,vy:Math.sin(shot)*265,life:6,damage:bossDamage})}}}
+      else if(e.k==='lancer'){
+        if(e.st===1){if((e.windup-=dt)<=0){e.st=0;e.fireT=1.7;const shot=Math.atan2(p.y-e.y,p.x-e.x);this.eb.push({x:e.x,y:e.y,vx:Math.cos(shot)*390,vy:Math.sin(shot)*390,life:6})}}
+        else if((e.fireT-=dt)<=0){const shot=Math.atan2(p.y-e.y,p.x-e.x);e.cx=Math.cos(shot);e.cy=Math.sin(shot);e.st=1;e.windup=.7}
+      }
       else if((e.fireT-=dt)<=0){let shots=1,spread=0,speed=190,interval=2.4;
         if(e.k==='shooter'){shots=this.wave>=4?5:this.wave>=2?3:1;spread=.18;speed=260;interval=Math.max(.75,1.65-this.wave*.12)}
         else if(e.k==='spinner'){shots=5;spread=TAU/5;speed=175;interval=1.45;e.sa+=.37}
-        else if(e.k==='lancer'){speed=330;interval=1.7}
         else if(e.k==='bomber'){shots=8;spread=TAU/8;speed=145;interval=2.1}
         else if(e.k==='tank'){shots=2;spread=.1;speed=200;interval=2.5}
         else{speed=170;interval=2.3}
@@ -439,12 +445,13 @@ const Game={state:'menu',time:0,best:0,p:null,
     const kinds=this.wave>=11?Array.from({length:Math.min(30,this.wave+5)},(_,i)=>enemyKinds[(i*3+this.wave)%enemyKinds.length]):formations[this.wave];
     const rows=Math.ceil(kinds.length/cols),rowGap=Math.min(88,(view.h-140)/Math.max(1,rows-1)),startY=Math.max(48,(view.h-rowGap*(rows-1))*.22);
     kinds.forEach((k,i)=>{const row=Math.floor(i/cols),rowKinds=Math.min(cols,kinds.length-row*cols),col=i%cols,gap=Math.min(110,(W-100)/Math.max(1,rowKinds-1));this.add(k,W/2+(col-(rowKinds-1)/2)*gap,startY+row*rowGap)})},
+  refreshMultiplier(){const xpBonus=Math.floor(this.totalXp/10)*(Admin.unlocked?Admin.config.xpMultiplier:1);this.mult=Math.min(10000,1+xpBonus+Math.floor(this.combo/5))},
   awardScore(points){const earned=points*50;this.score+=earned;return earned},
-  clearWave(){this.betweenWaves=true;this.waveDelay=2;const reward=this.wave*150;this.awardScore(this.wave*250);Profile.reward(this.wave);FX.text(view.w/2,view.h*.32,'WAVE CLEAR  +'+reward+' CREDITS',COL.gold,25)},
-  victory(){this.won=true;this.awardScore(2500);Profile.victory();this.over()},
+  clearWave(){this.betweenWaves=true;this.waveDelay=2;const reward=this.wave*150;this.awardScore(this.wave*250*this.mult);Profile.reward(this.wave);FX.text(view.w/2,view.h*.32,'WAVE CLEAR  +'+reward+' CREDITS',COL.gold,25)},
+  victory(){this.won=true;this.awardScore(2500*this.mult);Profile.victory();this.over()},
   damage(e,n){if(e.k==='boss'&&(this.wave===30||this.wave===50||this.wave===MAX_WAVE)){if(this.time<(e.nextHitAt||0))return;e.nextHitAt=this.time+.15}e.hp-=n;e.flash=.08;if(this.time-this.hitT>.05){this.hitT=this.time;Sfx.play('hit')}if(e.hp<=0&&!e.dead)this.kill(e)},
   kill(e){e.dead=true;const T=TYPES[e.k],old=this.mult;
-    this.combo++;this.comboT=2.6;this.mult=Math.min(8,1+Math.floor(this.combo/5));
+    this.combo++;this.comboT=2.6;this.refreshMultiplier();
     const pts=this.awardScore(T.pts*this.mult);
     FX.burst(e.x,e.y,T.col,T.n*5,300,.7,3.2);FX.burst(e.x,e.y,'#fff',6,200,.35,2);FX.hit(e.k==='tank'?9:4);Sfx.play('boom');
     FX.text(e.x,e.y-12,'+'+pts,T.col,e.k==='tank'?24:16);
@@ -454,8 +461,8 @@ const Game={state:'menu',time:0,best:0,p:null,
     if(e.k==='bomber')for(let i=0;i<8;i++){const a=i*TAU/8;this.eb.push({x:e.x,y:e.y,vx:Math.cos(a)*170,vy:Math.sin(a)*170,life:5})} // bombers burst into a bullet ring
     if(e.k==='boss'){this.eb.length=0;FX.flash=.6;FX.hit(22);FX.ring(e.x,e.y,Math.max(view.w,view.h),T.col);Sfx.play('win')}
     if(e.k==='boss'||Math.random()<.07)this.pu.push({x:e.x,y:e.y,k:e.k==='boss'?'life':['shield','bomb','life','rapid'][Math.floor(rnd(0,4))],t:12,a:0})},
-  gem(g){this.awardScore(5*this.mult);Sfx.play('gem',this.combo);FX.burst(g.x,g.y,COL.mint,4,120,.3,2);
-    if(++this.xp>=this.need){this.xp=0;this.need+=4;this.levelUp()}},
+  gem(g){this.totalXp++;this.xp++;this.refreshMultiplier();this.awardScore(5*this.mult);Sfx.play('gem',this.combo);FX.burst(g.x,g.y,COL.mint,4,120,.3,2);
+    if(this.xp>=this.need){this.xp=0;this.need+=4;this.levelUp()}},
   levelUp(){const p=this.p;
     if(this.lvl<5){this.lvl++;FX.text(p.x,p.y-30,'Weapon up!',COL.gold,22)}else{const bonus=this.awardScore(200*this.mult);FX.text(p.x,p.y-30,'+'+bonus,COL.gold,22)}
     this.blast(2,COL.gold);Sfx.play('up');
@@ -467,7 +474,7 @@ const Game={state:'menu',time:0,best:0,p:null,
   power(u){const p=this.p,m={shield:['Shield',COL.cyan],bomb:['Nova bomb',COL.gold],life:['Health +25',COL.pink],rapid:['Rapid fire',COL.mint]}[u.k];
     if(u.k==='shield')p.shield=Math.max(p.shield,8);else if(u.k==='bomb')this.blast(8,COL.gold);else if(u.k==='rapid')p.rapid=Math.max(p.rapid,8);else{p.maxHp=Math.min(this.wave>=30?10000:500,p.maxHp+25);p.hp=p.maxHp}
     FX.text(p.x,p.y-34,m[0],m[1],20);FX.burst(p.x,p.y,m[1],18,260,.5,3);Sfx.play('up')},
-  hurt(amount=5){const p=this.p;if(p.shield>0){p.inv=.25;FX.ring(p.x,p.y,110,COL.cyan);FX.burst(p.x,p.y,COL.cyan,8,160,.3,2);FX.hit(3);Sfx.play('hit');for(const b of this.eb)b.life=0;return}p.hp=Math.max(0,p.hp-amount);p.inv=1.1;this.combo=0;this.mult=1;this.comboT=0;
+  hurt(amount=5){const p=this.p;if(p.shield>0){p.inv=.25;FX.ring(p.x,p.y,110,COL.cyan);FX.burst(p.x,p.y,COL.cyan,8,160,.3,2);FX.hit(3);Sfx.play('hit');for(const b of this.eb)b.life=0;return}p.hp=Math.max(0,p.hp-amount);p.inv=1.1;this.combo=0;this.comboT=0;this.refreshMultiplier();
     FX.hit(14);FX.flash=1;FX.burst(p.x,p.y,COL.pink,26,320,.7,3.5);FX.ring(p.x,p.y,130,COL.pink);Sfx.play('hurt');
     for(const b of this.eb)b.life=0;if(p.hp<=0)this.die()},
   die(){const p=this.p;p.dead=true;this.state='dying';this.dieT=0;$('pb').style.display='none';
@@ -595,6 +602,9 @@ function draw(){
     c.textAlign='center';c.fillStyle=COL.cyan;c.shadowColor=COL.cyan;c.fillText('Wave '+G.wave+'/'+MAX_WAVE+'  |  Lv '+G.lvl,view.cw/2,16+fs*1.1);
     const B=G.enemies.find(e=>e.k==='boss');if(B){const bw=Math.min(420,view.cw*.7),bx=(view.cw-bw)/2,by=view.ch-42;c.textAlign='center';c.font='700 11px '+FONT;c.fillStyle=COL.pink;c.shadowBlur=0;c.fillText('BOSS  '+Math.ceil(B.hp)+' / '+B.mhp,view.cw/2,by-5);c.fillStyle='rgba(255,61,245,.22)';c.fillRect(bx,by,bw,8);c.fillStyle=COL.pink;c.shadowColor=COL.pink;c.shadowBlur=10*dpr;c.fillRect(bx,by,bw*clamp(B.hp/B.mhp,0,1),8)}
     c.fillStyle='#a592d6';c.shadowBlur=0;c.font='600 '+fs*.8+'px '+FONT;c.fillText('Best '+Math.max(G.best,G.score).toLocaleString(),view.cw/2,16+fs*2.2);
+    const xpw=Math.min(150,view.cw*.42),xpx=(view.cw-xpw)/2,xpy=16+fs*3.05;
+    c.textAlign='center';c.font='600 '+fs*.62+'px '+FONT;c.fillStyle=COL.mint;c.shadowColor=COL.mint;c.shadowBlur=5*dpr;c.fillText('XP '+G.totalXp.toLocaleString()+' | next '+G.xp+'/'+G.need,view.cw/2,xpy);
+    c.shadowBlur=0;c.fillStyle='rgba(255,255,255,.16)';c.fillRect(xpx,xpy+4,xpw,4);c.fillStyle=COL.mint;c.fillRect(xpx,xpy+4,xpw*clamp(G.xp/G.need,0,1),4);
     const hpw=Math.min(180,view.cw*.48),hpy=view.ch<500?142:view.ch-17;c.shadowBlur=0;c.textAlign='left';c.font='700 '+fs*.72+'px '+FONT;c.fillStyle=p.hp/p.maxHp<.3?COL.pink:COL.mint;c.fillText('HP  '+Math.ceil(p.hp)+' / '+p.maxHp,16,hpy-10);c.fillStyle='rgba(255,255,255,.16)';c.fillRect(16,hpy-7,hpw,7);c.fillStyle=p.hp/p.maxHp<.3?COL.pink:COL.mint;c.fillRect(16,hpy-7,hpw*clamp(p.hp/p.maxHp,0,1),7);
     if(p.shield>0){c.textAlign='right';c.fillStyle=COL.cyan;c.font='700 '+fs*.72+'px '+FONT;c.fillText('SHIELD '+Math.ceil(p.shield)+'s',view.cw-16,view.ch-10)}
     const q=Input.ptr;if(q&&G.state==='play'){c.shadowBlur=0;c.strokeStyle='rgba(255,255,255,.22)';c.lineWidth=2;c.beginPath();c.arc(q.x0,q.y0,60,0,TAU);c.stroke();
@@ -625,6 +635,7 @@ $('admin-open-menu').onclick=()=>Admin.open('menu');$('admin-open-pause').onclic
 $('admin-unlock').onclick=()=>Admin.unlock();$('admin-lock-close').onclick=()=>Admin.close();$('admin-close').onclick=()=>Admin.close();
 $('admin-fire-rate').oninput=e=>Admin.setFireRate(e.target.value);
 $('admin-damage').onchange=e=>Admin.setDamage(e.target.value);
+$('admin-xp-multiplier').onchange=e=>Admin.setXpMultiplier(e.target.value);
 $('admin-shield-duration').onchange=e=>Admin.setShieldDuration(e.target.value);
 $('admin-grant-shield').onclick=()=>Admin.grantShield();
 $('music-enabled').onchange=e=>Settings.setMusic(e.target.checked);
@@ -840,7 +851,7 @@ def run_gui(host, start_port):
         daemon=True,
     )
     server_thread.start()
-    url = f"http://localhost:{port}"
+    url = f"http://127.0.0.1:{port}"
 
     print("[startup] Neon Swarm desktop launcher starting.", flush=True)
     print(f"[startup] Game server listening at {url}", flush=True)
@@ -854,7 +865,7 @@ def run_gui(host, start_port):
     root.title("Neon Swarm - Loading")
     root.configure(bg="#0d0524")
     root.resizable(False, False)
-    width, height = 500, 360
+    width, height = 560, 390
     root.geometry(f"{width}x{height}")
     root.eval("tk::PlaceWindow . center")
 
@@ -866,7 +877,7 @@ def run_gui(host, start_port):
         font=("Segoe UI", 24, "bold"),
     )
     title.pack(pady=(28, 8))
-    status = tk.StringVar(value="Starting the game server...")
+    status = tk.StringVar(value="Connecting to the local game server...")
     tk.Label(
         root,
         textvariable=status,
@@ -898,15 +909,13 @@ def run_gui(host, start_port):
     )
     tk.Label(
         root,
-        text=f"Game address: {url}",
+        text="DESKTOP EDITION  |  LOCAL CONNECTION",
         bg="#0d0524",
         fg="#3df5ff",
-        font=("Segoe UI", 10),
+        font=("Segoe UI", 9, "bold"),
     ).pack(pady=(16, 0))
 
     started_at = time.monotonic()
-    last_logged_second = -1
-
     def stop_server():
         print("[shutdown] Stopping the game server.", flush=True)
         server.shutdown()
@@ -996,8 +1005,7 @@ def run_gui(host, start_port):
                 height=760,
                 min_size=(640, 480),
             )
-            # Let pywebview select an available Windows renderer automatically.
-            webview.start(debug=False)
+            webview.start(gui="edgechromium", debug=False)
             print("[gui] Game window closed.", flush=True)
         except Exception as exc:
             traceback.print_exc()
@@ -1009,21 +1017,27 @@ def run_gui(host, start_port):
             stop_server()
 
     def update_loading():
-        nonlocal last_logged_second
-        elapsed = time.monotonic() - started_at
-        progress = min(elapsed / 10, 1)
-        canvas.itemconfigure(progress_arc, extent=-360 * progress)
-        canvas.itemconfigure(progress_text, text=f"{int(progress * 100)}%")
-        whole_seconds = min(int(elapsed), 10)
-        if whole_seconds != last_logged_second:
-            last_logged_second = whole_seconds
-            print(f"[loading] {whole_seconds}/10 seconds", flush=True)
-        if elapsed >= 10:
-            status.set("Redirecting to the game window...")
-            print("[loading] 10-second loading complete; redirecting to the game.", flush=True)
-            root.after(500, open_game_window)
-        else:
-            root.after(100, update_loading)
+      elapsed = time.monotonic() - started_at
+      try:
+        with urlopen(url, timeout=0.4) as response:
+          ready = response.status == 200
+      except (OSError, URLError):
+        ready = False
+      if ready:
+        canvas.itemconfigure(progress_arc, start=90, extent=-360)
+        canvas.itemconfigure(progress_text, text="READY")
+        status.set("Opening the desktop game window...")
+        print("[loading] Local game server is ready; opening the desktop window.", flush=True)
+        root.after(250, open_game_window)
+        return
+      canvas.itemconfigure(progress_arc, start=90 - elapsed * 240, extent=-110)
+      canvas.itemconfigure(progress_text, text="...")
+      if elapsed >= 15:
+        root.destroy()
+        show_fallback("The local game server did not become ready.")
+        stop_server()
+        return
+      root.after(100, update_loading)
 
     root.protocol("WM_DELETE_WINDOW", lambda: (root.destroy(), stop_server()))
     root.after(0, update_loading)
@@ -1040,7 +1054,8 @@ def main():
     args = ap.parse_args()
 
     host = "0.0.0.0" if args.lan else "127.0.0.1"
-    if not args.server and (args.gui or getattr(sys, "frozen", False)):
+    is_executable = bool(getattr(sys, "frozen", False)) or Path(sys.argv[0]).suffix.lower() == ".exe"
+    if not args.server and (args.gui or is_executable):
         run_gui(host, args.port)
         return
 
