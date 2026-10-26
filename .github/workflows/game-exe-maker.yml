@@ -117,4 +117,36 @@ jobs:
             exit 0
           }
           git commit -m "Build Windows game package"
-          git push origin "HEAD:$env:GITHUB_REF_NAME"
+          $branch = $env:GITHUB_REF_NAME
+          $published = $false
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            git fetch origin $branch
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not fetch the latest $branch before publishing the package."
+            }
+
+            git diff --quiet $env:GITHUB_SHA "origin/$branch" -- . ":(exclude)downloads/neon-swarm-windows.zip"
+            if ($LASTEXITCODE -eq 1) {
+              Write-Host "Source advanced during the build; skipping this stale package."
+              exit 0
+            }
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not compare the build source with the latest $branch commit."
+            }
+
+            git rebase --strategy-option=theirs "origin/$branch"
+            if ($LASTEXITCODE -ne 0) {
+              git rebase --abort
+              throw "Could not rebase the generated package onto the latest $branch commit."
+            }
+
+            git push origin "HEAD:$branch"
+            if ($LASTEXITCODE -eq 0) {
+              $published = $true
+              break
+            }
+            Write-Host "Branch changed during publish attempt $attempt; retrying."
+          }
+          if (-not $published) {
+            throw "Could not publish the generated package after 3 attempts."
+          }
