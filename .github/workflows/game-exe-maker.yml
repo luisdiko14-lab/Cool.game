@@ -180,7 +180,7 @@ jobs:
               throw "Could not rebase the generated package onto the latest $branch commit."
             }
 
-            git push origin "HEAD:$branch"
+            git push origin "HEAD:$branch --force"
             if ($LASTEXITCODE -eq 0) {
               $published = $true
               break
