@@ -938,7 +938,7 @@ def run_gui(host, start_port, gui_smoke_test=False):
         ).pack(pady=(28, 16))
         tk.Label(
             fallback,
-            text="Install Microsoft Edge WebView2 Runtime, or open the game in your browser:",
+          text="The embedded desktop browser could not start. Open the game in your browser:",
             bg="#0d0524",
             fg="#a592d6",
             font=("Segoe UI", 10),
@@ -966,22 +966,6 @@ def run_gui(host, start_port, gui_smoke_test=False):
             padx=20,
             pady=8,
         ).pack(pady=18)
-        runtime_link = tk.Label(
-            fallback,
-            text="WebView2 Runtime: https://developer.microsoft.com/microsoft-edge/webview2/",
-            bg="#0d0524",
-            fg="#a592d6",
-            cursor="hand2",
-            font=("Segoe UI", 9),
-            wraplength=width - 48,
-        )
-        runtime_link.pack()
-        runtime_link.bind(
-            "<Button-1>",
-            lambda _event: webbrowser.open(
-                "https://developer.microsoft.com/microsoft-edge/webview2/"
-            ),
-        )
         tk.Label(
             fallback,
             text="Close this window to stop the game server.",
@@ -1011,7 +995,7 @@ def run_gui(host, start_port, gui_smoke_test=False):
               if gui_smoke_test:
                 window.destroy()
 
-            webview.start(func=on_loaded, gui="edgechromium", debug=False)
+            webview.start(func=on_loaded, gui="qt", debug=False)
             print("[gui] Game window closed.", flush=True)
         except Exception as exc:
             traceback.print_exc()
@@ -1019,7 +1003,7 @@ def run_gui(host, start_port, gui_smoke_test=False):
               webbrowser.open(url)
             show_fallback(
                 f"Embedded game window could not start ({type(exc).__name__}: {exc}). "
-                f"Open {url} in a browser or install Microsoft Edge WebView2 Runtime."
+                f"Open {url} in a browser."
             )
         finally:
             stop_server()
