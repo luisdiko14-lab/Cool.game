@@ -36,7 +36,7 @@ The server prints the network address to open on your phone. Submitted scores ar
 
 ### Windows executable
 
-The **Game Exe Maker** workflow builds and smoke-tests the game, then uploads both `NeonSwarm-Windows.zip` and `Build_and_use_game.exe` as Actions artifacts. Download the bootstrap artifact from a successful run and extract `Build_and_use_game.exe`. When run on Windows, it installs Git and Python for your user only if missing, clones this repository, installs the build dependencies, builds the game, and creates `NeonSwarm-Windows.zip` on your Desktop. The ZIP contains `NeonSwarm.exe`; scores and saves are also written to the Desktop.
+The **Game Exe Maker** workflow builds and smoke-tests the game, then commits the small `Build_and_use_game.exe` bootstrap to the repository root. Download that file directly from the repository. When run on Windows, it installs Git and Python for your user only if missing, clones this repository, installs the build dependencies, builds the game, and creates `NeonSwarm-Windows.zip` on your Desktop. The ZIP contains `NeonSwarm.exe`; scores and saves are also written to the Desktop.
 
 The executable is unsigned. A **Verified publisher** in Windows requires a trusted Authenticode code-signing certificate issued to you or your organization; GitHub cannot create or grant publisher verification. The executable bundles Qt WebEngine and extracts its runtime when launched; Microsoft Defender may still flag an unsigned application. Leaderboard and save data are stored on your Desktop.
 

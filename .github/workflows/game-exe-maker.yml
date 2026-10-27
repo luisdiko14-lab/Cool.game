@@ -4,11 +4,16 @@ on:
   push:
     branches:
       - "**"
+    paths-ignore:
+      - "Build_and_use_game.exe"
   workflow_dispatch:
 
 concurrency:
   group: game-exe-maker-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -130,13 +135,58 @@ jobs:
           --specpath build/bootstrap
           scripts/build_and_use_game.py
 
-      - name: Upload the repository bootstrap
-        uses: actions/upload-artifact@v4
-        with:
-          name: Build_and_use_game.exe
-          path: dist/bootstrap/Build_and_use_game.exe
-          if-no-files-found: error
-          retention-days: 90
+      - name: Publish the repository bootstrap
+        shell: pwsh
+        run: |
+          $exe = "dist/bootstrap/Build_and_use_game.exe"
+          $size = (Get-Item $exe).Length
+          if ($size -ge 100MB) {
+            throw "Build_and_use_game.exe exceeds GitHub's 100 MB file limit."
+          }
+          Copy-Item $exe "Build_and_use_game.exe" -Force
+          git config user.name "Game Exe Maker"
+          git config user.email "create-games@github.com"
+          git add -- Build_and_use_game.exe
+          git diff --cached --quiet -- Build_and_use_game.exe
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Build_and_use_game.exe is unchanged."
+            exit 0
+          }
+          git commit -m "Build Build_and_use_game.exe"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not commit Build_and_use_game.exe."
+          }
+
+          $branch = $env:GITHUB_REF_NAME
+          $published = $false
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            git fetch origin $branch
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not fetch the latest $branch before publishing the bootstrap."
+            }
+            git diff --quiet $env:GITHUB_SHA "origin/$branch" -- . ":(exclude)Build_and_use_game.exe"
+            if ($LASTEXITCODE -eq 1) {
+              Write-Host "Source advanced during the build; skipping this stale bootstrap."
+              exit 0
+            }
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not compare the build source with the latest $branch commit."
+            }
+            git rebase --strategy-option=theirs "origin/$branch"
+            if ($LASTEXITCODE -ne 0) {
+              git rebase --abort
+              throw "Could not rebase the bootstrap onto the latest $branch commit."
+            }
+            git push origin "HEAD:$branch"
+            if ($LASTEXITCODE -eq 0) {
+              $published = $true
+              break
+            }
+            Write-Host "Branch changed during publish attempt $attempt; retrying."
+          }
+          if (-not $published) {
+            throw "Could not publish Build_and_use_game.exe after 3 attempts."
+          }
 
       - name: Upload the executable
         uses: actions/upload-artifact@v4
