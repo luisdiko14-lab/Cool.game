@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-INPUT_EXE="${1:-dist/NeonSwarm/NeonSwarm.exe}"
+INPUT_EXE="${1:-dist/NeonSwarm.exe}"
 OUTPUT_EXE="${2:-$INPUT_EXE}"
 CERTIFICATE="${WINDOWS_CODESIGN_CERT:-}"
 PASSWORD="${WINDOWS_CODESIGN_CERT_PASSWORD:-}"

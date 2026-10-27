@@ -24,11 +24,11 @@ from urllib.error import URLError
 from urllib.parse import unquote, urlsplit
 from urllib.request import urlopen
 
-APP_DIR = (
-    Path(sys.executable).resolve().parent
-    if getattr(sys, "frozen", False)
-    else Path(__file__).resolve().parent
-)
+if getattr(sys, "frozen", False):
+  APP_DIR = Path.home() / "Desktop" if sys.platform == "win32" else Path(sys.executable).resolve().parent
+  APP_DIR.mkdir(parents=True, exist_ok=True)
+else:
+  APP_DIR = Path(__file__).resolve().parent
 DB = APP_DIR / "neon_swarm_scores.json"
 SAVES_DB = APP_DIR / "neon_swarm_saves.json"
 SAVE_KEYS = {"neonswarm.scores", "neonswarm.profile", "neonswarm.settings", "neonswarm.admin", "neonswarm.arcade"}

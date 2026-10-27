@@ -4,20 +4,15 @@ on:
   push:
     branches:
       - "**"
-    paths-ignore:
-      - "downloads/neon-swarm-windows.zip"
   workflow_dispatch:
 
 concurrency:
   group: game-exe-maker-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
-
 jobs:
   build:
-    name: Build and publish Windows ZIP
+    name: Build and upload Windows executable
     runs-on: windows-latest
     steps:
       - name: Check out the source
@@ -37,7 +32,7 @@ jobs:
 
       - name: Build the executable
         run: >-
-          python -m PyInstaller --noconfirm --clean --onedir --console
+          python -m PyInstaller --noconfirm --clean --onefile --console
           --collect-all webview
           --collect-all qtpy
           --collect-all PySide6
@@ -50,7 +45,7 @@ jobs:
         run: |
           $stdout = Join-Path $env:RUNNER_TEMP "neon-swarm.stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "neon-swarm.stderr.log"
-          $exe = "dist/NeonSwarm/NeonSwarm.exe"
+          $exe = "dist/NeonSwarm.exe"
           $server = Start-Process -FilePath $exe `
             -ArgumentList @("--server", "--no-browser", "--port", "18000") `
             -PassThru -NoNewWindow `
@@ -91,7 +86,7 @@ jobs:
         run: |
           $stdout = Join-Path $env:RUNNER_TEMP "neon-swarm-gui.stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "neon-swarm-gui.stderr.log"
-          $exe = "dist/NeonSwarm/NeonSwarm.exe"
+          $exe = "dist/NeonSwarm.exe"
           $app = Start-Process -FilePath $exe `
             -ArgumentList @("--gui-smoke-test", "--port", "18001") `
             -PassThru -NoNewWindow `
@@ -126,67 +121,27 @@ jobs:
             }
           }
 
-      - name: Package the executable
-        shell: pwsh
-        run: |
-          $package = Join-Path $env:RUNNER_TEMP "neon-swarm-package"
-          $outputZip = "downloads/neon-swarm-windows.zip"
-          New-Item -ItemType Directory -Force -Path $package, "downloads" | Out-Null
-          Copy-Item "dist/NeonSwarm/*" $package -Recurse -Force
-          @"
-          Neon Swarm for Windows
+      - name: Build the repository bootstrap
+        run: >-
+          python -m PyInstaller --noconfirm --clean --onefile --console
+          --name Build_and_use_game
+          --distpath dist/bootstrap
+          --workpath build/bootstrap
+          --specpath build/bootstrap
+          scripts/build_and_use_game.py
 
-          Run NeonSwarm.exe to open the game in its desktop window.
-          The app checks the local server during startup, then opens the game in an embedded Qt WebEngine window.
-          If the embedded window is unavailable, the app displays a clickable local game link.
-          To play from other devices on your Wi-Fi, run NeonSwarm.exe --lan.
-          Leaderboard and game save data are stored next to NeonSwarm.exe.
-          "@ | Set-Content -Encoding utf8 (Join-Path $package "README.txt")
-          Compress-Archive -Path (Join-Path $package "*") `
-            -DestinationPath $outputZip -Force
+      - name: Upload the repository bootstrap
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build_and_use_game.exe
+          path: dist/bootstrap/Build_and_use_game.exe
+          if-no-files-found: error
+          retention-days: 90
 
-      - name: Commit the ZIP package
-        shell: pwsh
-        run: |
-          git config user.name "Game Exe Maker"
-          git config user.email "create-games@github.com"
-          git add downloads/neon-swarm-windows.zip
-          git diff --cached --quiet
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "The generated ZIP is unchanged."
-            exit 0
-          }
-          git commit -m "Build Windows game package"
-          $branch = $env:GITHUB_REF_NAME
-          $published = $false
-          for ($attempt = 1; $attempt -le 3; $attempt++) {
-            git fetch origin $branch
-            if ($LASTEXITCODE -ne 0) {
-              throw "Could not fetch the latest $branch before publishing the package."
-            }
-
-            git diff --quiet $env:GITHUB_SHA "origin/$branch" -- . ":(exclude)downloads/neon-swarm-windows.zip"
-            if ($LASTEXITCODE -eq 1) {
-              Write-Host "Source advanced during the build; skipping this stale package."
-              exit 0
-            }
-            if ($LASTEXITCODE -ne 0) {
-              throw "Could not compare the build source with the latest $branch commit."
-            }
-
-            git rebase --strategy-option=theirs "origin/$branch"
-            if ($LASTEXITCODE -ne 0) {
-              git rebase --abort
-              throw "Could not rebase the generated package onto the latest $branch commit."
-            }
-
-            git push --force-with-lease origin "HEAD:$branch"
-            if ($LASTEXITCODE -eq 0) {
-              $published = $true
-              break
-            }
-            Write-Host "Branch changed during publish attempt $attempt; retrying."
-          }
-          if (-not $published) {
-            throw "Could not publish the generated package after 3 attempts."
-          }
+      - name: Upload the executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeonSwarm-Windows.zip
+          path: dist/NeonSwarm.exe
+          if-no-files-found: error
+          retention-days: 90
