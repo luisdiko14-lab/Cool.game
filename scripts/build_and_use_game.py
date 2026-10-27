@@ -2,7 +2,6 @@
 """Install build tools per-user, clone Neon Swarm, and build a Desktop ZIP."""
 
 import ctypes
-import json
 import os
 import shutil
 import subprocess
@@ -14,10 +13,7 @@ from pathlib import Path
 
 REPOSITORY = "https://github.com/luisdiko14-lab/Cool.game.git"
 PYTHON_VERSION = "3.12.10"
-PYTHON_URL = (
-    f"https://www.python.org/ftp/python/{PYTHON_VERSION}/"
-    f"python-{PYTHON_VERSION}-amd64.exe"
-)
+PYTHON_URL = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 PACKAGES = [
     "pyinstaller==6.22.3",
     "pywebview[pyside6]==6.2.1",
@@ -106,46 +102,23 @@ def install_python(tool_directory):
 
 
 def install_git(tool_directory):
-    request = urllib.request.Request(
-        "https://api.github.com/repos/git-for-windows/git/releases/latest",
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "Build-and-use-game",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        release = json.load(response)
-    asset = next(
-        (
-            item
-            for item in release.get("assets", [])
-            if item.get("name", "").lower().startswith("mingit-")
-            and "64-bit.zip" in item.get("name", "").lower()
-        ),
-        None,
-    )
-    download_url = asset.get("browser_download_url", "") if asset else ""
-    if not download_url.startswith(
-        "https://github.com/git-for-windows/git/releases/download/"
-    ):
-        raise RuntimeError("Could not find the official Git for Windows portable package.")
-
-    archive_path = tool_directory / asset["name"]
+    installer_url = "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.4/Git-2.56.0.4-64-bit.exe"
+    installer = tool_directory / "Git-2.56.0.4-64-bit.exe"
     git_root = tool_directory / "Git"
-    download(download_url, archive_path)
-    git_root.mkdir(parents=True, exist_ok=True)
-    resolved_root = git_root.resolve()
-    with zipfile.ZipFile(archive_path) as archive:
-        for item in archive.infolist():
-            resolved_item = (git_root / item.filename).resolve()
-            if os.path.commonpath((str(resolved_root), str(resolved_item))) != str(
-                resolved_root
-            ):
-                raise RuntimeError("Git archive contains an invalid path.")
-        archive.extractall(git_root)
+    download(installer_url, installer)
+    run(
+        [
+            str(installer),
+            "/VERYSILENT",
+            "/NORESTART",
+            "/SP-",
+            "/CURRENTUSER",
+            f"/DIR={git_root}",
+        ]
+    )
     executable = git_root / "cmd" / "git.exe"
     if not executable.is_file():
-        raise RuntimeError("Git portable package did not contain cmd/git.exe.")
+        raise RuntimeError("Git installer did not create cmd/git.exe.")
     return executable
 
 
