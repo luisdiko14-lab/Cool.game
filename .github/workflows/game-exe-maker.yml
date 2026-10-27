@@ -85,6 +85,46 @@ jobs:
             }
           }
 
+      - name: Smoke-test the desktop GUI
+        shell: pwsh
+        run: |
+          $stdout = Join-Path $env:RUNNER_TEMP "neon-swarm-gui.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "neon-swarm-gui.stderr.log"
+          $exe = "dist/NeonSwarm/NeonSwarm.exe"
+          $app = Start-Process -FilePath $exe `
+            -ArgumentList @("--gui-smoke-test", "--port", "18001") `
+            -PassThru -NoNewWindow `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $loaded = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              if (Test-Path $stdout) {
+                $log = Get-Content $stdout -Raw
+                if ($log.Contains("[gui] Embedded game page loaded.")) {
+                  $loaded = $true
+                  break
+                }
+                if ($log.Contains("Embedded game window could not start")) {
+                  Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+                  throw "The packaged desktop GUI could not start."
+                }
+              }
+              if ($app.HasExited) {
+                Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+                throw "NeonSwarm.exe exited before the desktop game page loaded."
+              }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $loaded) {
+              Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+              throw "The packaged desktop GUI did not load the game page."
+            }
+          } finally {
+            if (-not $app.HasExited) {
+              Stop-Process -Id $app.Id -Force
+            }
+          }
+
       - name: Package the executable
         shell: pwsh
         run: |

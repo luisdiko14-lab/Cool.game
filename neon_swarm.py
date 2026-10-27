@@ -841,7 +841,7 @@ def create_server(host, start_port):
     raise SystemExit(f"No free port found. Try: python neon_swarm.py --port {start_port + 20}")
 
 
-def run_gui(host, start_port):
+def run_gui(host, start_port, gui_smoke_test=False):
     import tkinter as tk
 
     server, port = create_server(host, start_port)
@@ -998,17 +998,25 @@ def run_gui(host, start_port):
         try:
             import webview
 
-            webview.create_window(
+            window = webview.create_window(
                 "Neon Swarm",
                 url,
                 width=1100,
                 height=760,
                 min_size=(640, 480),
             )
-            webview.start(gui="edgechromium", debug=False)
+
+            def on_loaded():
+              print("[gui] Embedded game page loaded.", flush=True)
+              if gui_smoke_test:
+                window.destroy()
+
+            webview.start(func=on_loaded, gui="edgechromium", debug=False)
             print("[gui] Game window closed.", flush=True)
         except Exception as exc:
             traceback.print_exc()
+            if not gui_smoke_test:
+              webbrowser.open(url)
             show_fallback(
                 f"Embedded game window could not start ({type(exc).__name__}: {exc}). "
                 f"Open {url} in a browser or install Microsoft Edge WebView2 Runtime."
@@ -1050,13 +1058,14 @@ def main():
     ap.add_argument("--lan", action="store_true", help="listen on your network so phones can play")
     ap.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
     ap.add_argument("--gui", action="store_true", help="open the desktop game window")
+    ap.add_argument("--gui-smoke-test", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--server", action="store_true", help="run only the game server")
     args = ap.parse_args()
 
     host = "0.0.0.0" if args.lan else "127.0.0.1"
     is_executable = bool(getattr(sys, "frozen", False)) or Path(sys.argv[0]).suffix.lower() == ".exe"
-    if not args.server and (args.gui or is_executable):
-        run_gui(host, args.port)
+    if not args.server and (args.gui or args.gui_smoke_test or is_executable):
+        run_gui(host, args.port, args.gui_smoke_test)
         return
 
     server, port = create_server(host, args.port)
