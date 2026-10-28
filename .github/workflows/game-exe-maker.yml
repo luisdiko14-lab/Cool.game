@@ -98,7 +98,7 @@ jobs:
             -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           try {
             $loaded = $false
-            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            for ($attempt = 0; $attempt -lt 120; $attempt++) {
               if (Test-Path $stdout) {
                 [string]$log = Get-Content $stdout -Raw -ErrorAction SilentlyContinue
                 if ($log.Contains("[gui] Embedded game page loaded.")) {

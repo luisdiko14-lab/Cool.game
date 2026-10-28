@@ -992,10 +992,9 @@ def run_gui(host, start_port, gui_smoke_test=False):
 
             def on_loaded():
               print("[gui] Embedded game page loaded.", flush=True)
-              if gui_smoke_test:
-                window.destroy()
 
-            webview.start(func=on_loaded, gui="qt", debug=False)
+            window.events.loaded += on_loaded
+            webview.start(gui="qt", debug=False)
             print("[gui] Game window closed.", flush=True)
         except Exception as exc:
             traceback.print_exc()
