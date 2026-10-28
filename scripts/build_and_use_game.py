@@ -9,7 +9,6 @@ import ssl
 import subprocess
 import sys
 import threading
-import tempfile
 import tkinter as tk
 import urllib.error
 import urllib.request
@@ -206,6 +205,8 @@ def find_desktop():
 def download_source_archive(work):
     archive_path = work / "Cool.game-source.zip"
     extraction_root = work / "source-archive"
+    shutil.rmtree(extraction_root, ignore_errors=True)
+    archive_path.unlink(missing_ok=True)
     download(SOURCE_ARCHIVE, archive_path)
     extraction_root.mkdir()
 
@@ -243,73 +244,86 @@ def build_zip(tool_directory, python_executable, git_executable):
             [str(path) for path in git_paths] + [environment.get("PATH", "")]
         )
 
-    with tempfile.TemporaryDirectory(prefix="neon-swarm-build-") as temporary:
-        work = Path(temporary)
-        source = work / "Cool.game"
-        try:
-            if git_executable is None:
-                raise RuntimeError("Git was skipped by the user.")
-            run(
-                [str(git_executable), "clone", "--depth", "1", REPOSITORY, str(source)],
-                env=environment,
-            )
-        except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
-            report(
-                f"Git clone failed ({error}); downloading the repository source archive instead."
-            )
-            shutil.rmtree(source, ignore_errors=True)
-            source = download_source_archive(work)
+    work = tool_directory / "workspace"
+    work.mkdir(parents=True, exist_ok=True)
+    source = work / "Cool.game"
+    shutil.rmtree(source, ignore_errors=True)
+    shutil.rmtree(work / "source-archive", ignore_errors=True)
+    (work / "Cool.game-source.zip").unlink(missing_ok=True)
 
-        venv = work / "venv"
-        run([str(python_executable), "-m", "venv", str(venv)])
-        venv_python = venv / "Scripts" / "python.exe"
-        run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"])
-        run([str(venv_python), "-m", "pip", "install", *PACKAGES])
-
-        executable = work / "dist" / "NeonSwarm.exe"
+    try:
+        if git_executable is None:
+            raise RuntimeError("Git was skipped by the user.")
         run(
-            [
-                str(venv_python),
-                "-m",
-                "PyInstaller",
-                "--noconfirm",
-                "--clean",
-                "--onefile",
-                "--console",
-                "--collect-all",
-                "webview",
-                "--collect-all",
-                "qtpy",
-                "--collect-all",
-                "PySide6",
-                "--name",
-                "NeonSwarm",
-                "--distpath",
-                str(executable.parent),
-                "--workpath",
-                str(work / "build"),
-                "--specpath",
-                str(work),
-                "--add-data",
-                "MATADORA (Sped Up).mp3;.",
-                "neon_swarm.py",
-            ],
-            cwd=source,
+            [str(git_executable), "clone", "--depth", "1", REPOSITORY, str(source)],
+            env=environment,
         )
-        if not executable.is_file():
-            raise RuntimeError("PyInstaller did not create NeonSwarm.exe.")
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        report(
+            f"Git clone failed ({error}); downloading the repository source archive instead."
+        )
+        shutil.rmtree(source, ignore_errors=True)
+        source = download_source_archive(work)
 
-        desktop = find_desktop()
-        package = desktop / "NeonSwarm-Windows.zip"
-        readme = (
-            "Neon Swarm for Windows\n\n"
-            "Run NeonSwarm.exe to start the desktop game. Scores and saves are "
-            "stored on the Desktop.\n"
-        )
-        report(f"\nCreating {package}...")
-        with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_STORED) as archive:
-            archive.write(executable, "NeonSwarm.exe")
-            archive.writestr("README.txt", readme)
+    audio = source / "MATADORA (Sped Up).mp3"
+    if not audio.is_file():
+        raise FileNotFoundError(f"The repository source is missing the bundled audio: {audio}")
+
+    venv = work / "venv"
+    build_directory = work / "build"
+    distribution = work / "dist"
+    shutil.rmtree(venv, ignore_errors=True)
+    shutil.rmtree(build_directory, ignore_errors=True)
+    shutil.rmtree(distribution, ignore_errors=True)
+    run([str(python_executable), "-m", "venv", str(venv)])
+    venv_python = venv / "Scripts" / "python.exe"
+    run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"])
+    run([str(venv_python), "-m", "pip", "install", *PACKAGES])
+
+    executable = distribution / "NeonSwarm.exe"
+    run(
+        [
+            str(venv_python),
+            "-m",
+            "PyInstaller",
+            "--noconfirm",
+            "--clean",
+            "--onefile",
+            "--console",
+            "--collect-all",
+            "webview",
+            "--collect-all",
+            "qtpy",
+            "--collect-all",
+            "PySide6",
+            "--name",
+            "NeonSwarm",
+            "--distpath",
+            str(distribution),
+            "--workpath",
+            str(build_directory),
+            "--specpath",
+            str(work),
+            "--add-data",
+            f"{audio};.",
+            "neon_swarm.py",
+        ],
+        cwd=source,
+    )
+    if not executable.is_file():
+        raise RuntimeError("PyInstaller did not create NeonSwarm.exe.")
+
+    desktop = find_desktop()
+    package = desktop / "NeonSwarm-Windows.zip"
+    readme = (
+        "Neon Swarm for Windows\n\n"
+        "Run NeonSwarm.exe to start the desktop game. Scores and saves are "
+        "stored on the Desktop.\n"
+    )
+    report(f"\nCreating {package}...")
+    with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.write(executable, "NeonSwarm.exe")
+        archive.writestr("README.txt", readme)
     return package
 
 
