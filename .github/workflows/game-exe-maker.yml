@@ -128,7 +128,7 @@ jobs:
 
       - name: Build the repository bootstrap
         run: >-
-          python -m PyInstaller --noconfirm --clean --onefile --console
+          python -m PyInstaller --noconfirm --clean --onefile --windowed
           --name Build_and_use_game
           --distpath dist/bootstrap
           --workpath build/bootstrap
