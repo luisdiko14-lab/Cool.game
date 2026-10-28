@@ -9,9 +9,10 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 REPOSITORY = "https://github.com/luisdiko14-lab/Cool.game.git"
+SOURCE_ARCHIVE = "https://codeload.github.com/luisdiko14-lab/Cool.game/zip/refs/heads/main"
 PYTHON_VERSION = "3.12.10"
 PYTHON_URL = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 PACKAGES = [
@@ -130,6 +131,32 @@ def find_desktop():
     return desktop
 
 
+def download_source_archive(work):
+    archive_path = work / "Cool.game-source.zip"
+    extraction_root = work / "source-archive"
+    download(SOURCE_ARCHIVE, archive_path)
+    extraction_root.mkdir()
+
+    with zipfile.ZipFile(archive_path) as archive:
+        entries = [PurePosixPath(name) for name in archive.namelist() if name]
+        root_names = {entry.parts[0] for entry in entries if entry.parts}
+        if len(root_names) != 1:
+            raise RuntimeError("The repository source archive has an invalid layout.")
+        root = extraction_root.resolve()
+        for entry in entries:
+            if entry.is_absolute() or ".." in entry.parts or "\\" in entry.as_posix():
+                raise RuntimeError("The repository source archive contains an invalid path.")
+            target = (extraction_root / Path(*entry.parts)).resolve()
+            if os.path.commonpath((str(root), str(target))) != str(root):
+                raise RuntimeError("The repository source archive contains an invalid path.")
+        archive.extractall(extraction_root)
+
+    source = extraction_root / next(iter(root_names))
+    if not (source / "neon_swarm.py").is_file():
+        raise RuntimeError("Downloaded repository archive does not contain neon_swarm.py.")
+    return source
+
+
 def build_zip(tool_directory, python_executable, git_executable):
     environment = os.environ.copy()
     if git_executable.parent.name.lower() == "cmd":
@@ -148,10 +175,18 @@ def build_zip(tool_directory, python_executable, git_executable):
     with tempfile.TemporaryDirectory(prefix="neon-swarm-build-") as temporary:
         work = Path(temporary)
         source = work / "Cool.game"
-        run(
-            [str(git_executable), "clone", "--depth", "1", REPOSITORY, str(source)],
-            env=environment,
-        )
+        try:
+            run(
+                [str(git_executable), "clone", "--depth", "1", REPOSITORY, str(source)],
+                env=environment,
+            )
+        except (OSError, subprocess.CalledProcessError) as error:
+            print(
+                f"Git clone failed ({error}); downloading the repository source archive instead.",
+                flush=True,
+            )
+            shutil.rmtree(source, ignore_errors=True)
+            source = download_source_archive(work)
 
         venv = work / "venv"
         run([str(python_executable), "-m", "venv", str(venv)])
