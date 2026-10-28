@@ -174,8 +174,24 @@ jobs:
             }
             git rebase --strategy-option=theirs "origin/$branch"
             if ($LASTEXITCODE -ne 0) {
-              git rebase --abort
-              throw "Could not rebase the bootstrap onto the latest $branch commit."
+              $conflicts = @(git diff --name-only --diff-filter=U)
+              if ($conflicts.Count -ne 1 -or $conflicts[0] -ne "Build_and_use_game.exe") {
+                git rebase --abort
+                throw "Could not rebase the bootstrap onto the latest $branch commit."
+              }
+
+              Write-Host "Resolving the generated bootstrap conflict with the newly built EXE."
+              git checkout --theirs -- Build_and_use_game.exe
+              if ($LASTEXITCODE -ne 0) {
+                git rebase --abort
+                throw "Could not restore the newly built bootstrap after the rebase conflict."
+              }
+              git add -- Build_and_use_game.exe
+              git -c core.editor=true rebase --continue
+              if ($LASTEXITCODE -ne 0) {
+                git rebase --abort
+                throw "Could not finish rebasing the newly built bootstrap."
+              }
             }
             git push origin "HEAD:$branch"
             if ($LASTEXITCODE -eq 0) {
