@@ -24,6 +24,7 @@ PACKAGES = [
     "pyinstaller==6.22.3",
     "pywebview[pyside6]==6.2.1",
     "PySide6==6.10.3",
+    "cryptography>=41.0.7",
 ]
 LOG_HANDLER = print
 
@@ -265,7 +266,7 @@ def build_zip(tool_directory, python_executable, git_executable):
         shutil.rmtree(source, ignore_errors=True)
         source = download_source_archive(work)
 
-    audio = source / "MATADORA (Sped Up).mp3"
+    audio = source / "Raya(Slowed).mp3"
     if not audio.is_file():
         raise FileNotFoundError(f"The repository source is missing the bundled audio: {audio}")
 
@@ -296,6 +297,8 @@ def build_zip(tool_directory, python_executable, git_executable):
             "qtpy",
             "--collect-all",
             "PySide6",
+            "--collect-all",
+            "cryptography",
             "--name",
             "NeonSwarm",
             "--distpath",

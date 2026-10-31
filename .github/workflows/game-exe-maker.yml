@@ -32,7 +32,7 @@ jobs:
 
       - name: Install PyInstaller
         run: >-
-          python -m pip install pyinstaller==6.22.3
+          python -m pip install pyinstaller==6.22.3 "cryptography>=41.0.7"
           "pywebview[pyside6]==6.2.1" PySide6==6.10.3
 
       - name: Build the executable
@@ -41,8 +41,9 @@ jobs:
           --collect-all webview
           --collect-all qtpy
           --collect-all PySide6
+          --collect-all cryptography
           --name NeonSwarm
-          --add-data "MATADORA (Sped Up).mp3;."
+          --add-data "Raya(Slowed).mp3;."
           neon_swarm.py
 
       - name: Smoke-test the executable
@@ -76,7 +77,7 @@ jobs:
               Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
               throw "NeonSwarm.exe did not serve the game page."
             }
-            $audio = Invoke-WebRequest -Uri "http://127.0.0.1:18000/MATADORA%20(Sped%20Up).mp3" -TimeoutSec 10
+            $audio = Invoke-WebRequest -Uri "http://127.0.0.1:18000/Raya(Slowed).mp3" -TimeoutSec 10
             if ($audio.StatusCode -ne 200 -or $audio.RawContentLength -eq 0) {
               throw "The executable did not serve its bundled audio."
             }
