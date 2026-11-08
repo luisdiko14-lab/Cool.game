@@ -117,12 +117,15 @@
       .feature-choice strong,.feature-choice small{display:block}
       .feature-choice small{margin-top:5px;color:var(--dim);font-size:11px}
       .feature-note{color:var(--dim);font-size:12px;max-width:52ch}
+      .feature-daily-scores{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin:0;padding:0;list-style:none;color:var(--gold);font-size:11px}
       .feature-meter{width:min(520px,90vw);height:8px;background:#1a2340;border-radius:8px;overflow:hidden}
       .feature-meter i{display:block;height:100%;background:var(--cyan)}
       #feature-replay{width:min(620px,92vw);height:200px;background:#080c17;border:1px solid rgba(61,245,255,.4);border-radius:8px}
       .feature-pilot{position:fixed;z-index:6;width:24px;height:30px;display:none;background:#79ffad;clip-path:polygon(50% 0,100% 100%,50% 78%,0 100%);filter:drop-shadow(0 0 9px #79ffad);pointer-events:none;transform:translate(-50%,-50%)}
       body.access-contrast{--ink:#fff;--dim:#e3efff;--cyan:#00ffff;--pink:#ff4d00;}
+      body.access-contrast canvas{filter:contrast(1.28) saturate(1.18)}
       body.access-large #fps-counter{font-size:17px;padding:8px 11px}
+      body.access-large #pb{font-size:19px;min-height:44px}
       body.access-large .panel p,body.access-large .panel button{font-size:19px}
       body.access-calm *{scroll-behavior:auto!important}
       @media(max-width:720px){.feature-tabs{max-width:94vw}.feature-content{max-height:58vh}.feature-choice{min-width:130px}}
@@ -147,7 +150,6 @@
         <p id="feature-daily" class="feature-note"></p>
         <ol id="feature-daily-scores" class="feature-daily-scores" aria-label="Today's daily challenge leaderboard"></ol>
         <div class="feature-row" id="feature-modes"></div>
-          .feature-daily-scores{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin:0;padding:0;list-style:none;color:var(--gold);font-size:11px}
         <p id="feature-mode-note" class="feature-note"></p>
         <button id="feature-launch" type="button">Launch selected run</button>
       </div>

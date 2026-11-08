@@ -1015,7 +1015,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/auth":
             return self.auth_status()
         if path in ("/", "/index.html"):
-          return self.send_body(200, GAME_HTML, "text/html")
+          try:
+            feature_path = Path(__file__).resolve().with_name("neon_features.js")
+            feature_script = feature_path.read_text(encoding="utf-8")
+          except OSError:
+            return self.send_body(500, '{"error":"game features are unavailable"}')
+          feature_tag = '<script src="/neon_features.js"></script>'
+          if feature_tag not in GAME_HTML:
+            return self.send_body(500, '{"error":"game feature hook is missing"}')
+          html = GAME_HTML.replace(feature_tag, "<script>\n" + feature_script + "\n</script>")
+          return self.send_body(200, html, "text/html")
         if path == "/neon_features.js":
           try:
             features = Path(__file__).resolve().with_name("neon_features.js").read_text(encoding="utf-8")

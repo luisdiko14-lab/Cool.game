@@ -1,1 +1,5 @@
 .env
+*/npm
+*/node_modules
+*/.npm
+*/.bin
