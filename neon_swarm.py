@@ -1322,9 +1322,15 @@ def run_gui(host, start_port, gui_smoke_test=False):
                   const menuButton = Array.from(document.querySelectorAll('#menu button'))
                     .find(button => button.textContent.trim() === 'Modes & features');
                   if (!menuButton) return 'missing-menu-button';
+                  if (typeof menuButton.onclick !== 'function') return 'missing-menu-button-handler';
+                  const errors = [];
+                  const captureError = event => errors.push(String(event.message || event.error || 'unknown JavaScript error'));
+                  window.addEventListener('error', captureError);
                   menuButton.click();
+                  window.removeEventListener('error', captureError);
                   const panel = document.getElementById('feature-panel');
                   if (!panel) return 'missing-feature-panel';
+                  if (errors.length) return `click-error:${errors.join('; ')}`;
                   if (!panel.classList.contains('on')) return 'feature-panel-not-open';
                   const modeTab = document.querySelector('[data-feature-tab="modes"]');
                   if (!modeTab) return 'missing-modes-tab';
