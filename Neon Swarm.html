@@ -531,6 +531,6 @@ $('sub').onclick=async()=>{const n=$('nm').value.trim().slice(0,12)||'Player';$(
   else $('submit-status').textContent='Could not save this score. Check browser storage or the server.'};
 SavedData.init().finally(()=>{Profile.init();Settings.init();Admin.init();MiniGames.init();Input.bind();resize();Game.best=Store.load()[0]?.s||0;board($('b0'),Store.load(),-1);Net.get().then(s=>s&&board($('b0'),s,-1));requestAnimationFrame(frame)});
 </script>
-<script src="neon_features.js"></script>
+<script src="neon_swarm_features.js"></script>
 </body>
 </html>

@@ -269,7 +269,7 @@ def build_zip(tool_directory, python_executable, git_executable):
     audio = source / "Raya(Slowed).mp3"
     if not audio.is_file():
         raise FileNotFoundError(f"The repository source is missing the bundled audio: {audio}")
-    features_script = source / "neon_features.js"
+    features_script = source / "neon_swarm_features.js"
     if not features_script.is_file():
         raise FileNotFoundError(f"The repository source is missing game features: {features_script}")
 

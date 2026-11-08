@@ -43,7 +43,7 @@ jobs:
           --collect-all PySide6
           --collect-all cryptography
           --name NeonSwarm
-          --add-data "neon_features.js;."
+          --add-data "neon_swarm_features.js;."
           --add-data "Raya(Slowed).mp3;."
           neon_swarm.py
 
@@ -66,7 +66,7 @@ jobs:
               }
               try {
                 $page = Invoke-WebRequest -Uri "http://127.0.0.1:18000/" -TimeoutSec 2
-                if ($page.StatusCode -eq 200 -and $page.Content.Contains("Neon Swarm") -and $page.Content.Contains("Mission Control")) {
+                if ($page.StatusCode -eq 200 -and $page.Content.Contains("Neon Swarm") -and $page.Content.Contains("Mission Control") -and $page.Content.Contains('data-feature-tab="modes"') -and $page.Content.Contains("feature-launch")) {
                   $ready = $true
                   break
                 }
@@ -103,9 +103,13 @@ jobs:
             for ($attempt = 0; $attempt -lt 120; $attempt++) {
               if (Test-Path $stdout) {
                 [string]$log = Get-Content $stdout -Raw -ErrorAction SilentlyContinue
-                if ($log.Contains("[gui] Embedded game page loaded.")) {
+                if ($log.Contains("[gui] Mission Control interaction passed.")) {
                   $loaded = $true
                   break
+                }
+                if ($log.Contains("[gui] Mission Control interaction failed.")) {
+                  Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+                  throw "The packaged desktop GUI could not open Mission Control."
                 }
                 if ($log.Contains("Embedded game window could not start")) {
                   Get-Content $stdout, $stderr -ErrorAction SilentlyContinue

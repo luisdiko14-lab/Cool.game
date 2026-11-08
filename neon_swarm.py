@@ -216,7 +216,7 @@ body.low-pixels canvas{image-rendering:pixelated}
 <button class="alt" id="admin-open-menu" type="button">Admin commands</button>
 <button id="play">Start run</button>
 </section>
-<section class="panel" id="pause"><h2>Paused</h2><button id="resume">Resume</button><button class="alt" id="shop-open-pause" type="button">Shop</button><button class="alt" id="settings-pause" type="button">Settings</button><button class="alt" id="games-open-pause" type="button">Other games!</button><button class="alt" id="admin-open-pause" type="button">Admin commands</button><button class="alt" id="quit">Quit to menu</button></section>
+<section class="panel" id="pause"><h2>Paused</h2><button id="resume">Resume</button><button class="alt" id="records-open-pause" type="button">Pilot records</button><button class="alt" id="shop-open-pause" type="button">Shop</button><button class="alt" id="settings-pause" type="button">Settings</button><button class="alt" id="games-open-pause" type="button">Other games!</button><button class="alt" id="admin-open-pause" type="button">Admin commands</button><button class="alt" id="quit">Quit to menu</button></section>
 <section class="panel" id="settings"><h2>Settings</h2><label class="setting-row"><span>Music</span><input id="music-enabled" type="checkbox"></label><label class="setting-row"><span>Music volume</span><input id="music-volume" type="range" min="0" max="100" value="35"></label><label class="setting-row"><span>Effects volume</span><input id="effects-volume" type="range" min="0" max="100" value="65"></label><label class="setting-row"><span>Frame cap <output id="fps-cap-value">60</output> FPS</span><input id="fps-cap" type="range" min="20" max="1000" step="10" value="60"></label><label class="setting-row"><span>FPS counter</span><input id="fps-visible" type="checkbox"></label><label class="setting-row"><span>Resolution quality</span><select id="resolution"><option value="240">240p - Low (no FX/music)</option><option value="340">340p - Low (no FX/music)</option><option value="480">480p</option><option value="720">720p</option><option value="1080">1080p</option><option value="1440">1440p (2K HD)</option><option value="2160">2160p (4K Ultra HD)</option><option value="4320">4320p (8K Ultra HD+)</option></select></label><p>FPS is limited by your display/browser. Resolution changes in-game rendering quality, not your monitor, and may be capped by device memory.</p><button class="alt" id="settings-close" type="button">Done</button></section>
 <section class="panel" id="records"><h2>Pilot records</h2><p id="records-summary"></p><div class="career-grid"><div class="career-stat"><span>Sorties</span><strong id="career-runs">0</strong></div><div class="career-stat"><span>Campaign wins</span><strong id="career-wins">0</strong></div><div class="career-stat"><span>Best wave</span><strong id="career-wave">0</strong></div><div class="career-stat"><span>Best score</span><strong id="career-score">0</strong></div><div class="career-stat"><span>Eliminations</span><strong id="career-kills">0</strong></div><div class="career-stat"><span>Bosses defeated</span><strong id="career-bosses">0</strong></div></div><div class="achievement-grid" id="achievement-list"></div><button class="alt" id="records-close" type="button">Back</button></section>
 <section class="panel" id="shop"><h2>Hangar shop</h2><p id="shop-balance"></p><p>Earn credits by clearing waves. Buy a ship, then equip it here or from the quick-select row.</p><div class="shop-grid" id="shop-grid"></div><button class="alt" id="shop-close" type="button">Back</button></section>
@@ -755,7 +755,7 @@ $('sub').onclick=async()=>{const n=$('nm').value.trim().slice(0,12)||'Player';$(
 window.NeonSwarmCore={Game,Profile,Settings,Input,FX,Sfx,TYPES,PAT,BOSS_HP,MAX_WAVE,getView:()=>view,canvas:cv,savedData:typeof SavedData==='undefined'?null:SavedData};
 SavedData.init().finally(()=>{Profile.init();Settings.init();Admin.init();MiniGames.init();Racer.init();Input.bind();resize();Game.best=Store.load()[0]?.s||0;board($('b0'),Store.load(),-1);Net.get().then(s=>s&&board($('b0'),s,-1));requestAnimationFrame(frame)});
 </script>
-<script src="/neon_features.js"></script>
+<script src="/neon_swarm_features.js"></script>
 </body>
 </html>
 '''
@@ -1016,18 +1016,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.auth_status()
         if path in ("/", "/index.html"):
           try:
-            feature_path = Path(__file__).resolve().with_name("neon_features.js")
+            feature_path = Path(__file__).resolve().with_name("neon_swarm_features.js")
             feature_script = feature_path.read_text(encoding="utf-8")
           except OSError:
             return self.send_body(500, '{"error":"game features are unavailable"}')
-          feature_tag = '<script src="/neon_features.js"></script>'
+          feature_tag = '<script src="/neon_swarm_features.js"></script>'
           if feature_tag not in GAME_HTML:
             return self.send_body(500, '{"error":"game feature hook is missing"}')
           html = GAME_HTML.replace(feature_tag, "<script>\n" + feature_script + "\n</script>")
           return self.send_body(200, html, "text/html")
-        if path == "/neon_features.js":
+        if path == "/neon_swarm_features.js":
           try:
-            features = Path(__file__).resolve().with_name("neon_features.js").read_text(encoding="utf-8")
+            features = Path(__file__).resolve().with_name("neon_swarm_features.js").read_text(encoding="utf-8")
             return self.send_body(200, features, "application/javascript")
           except OSError:
             return self.send_body(404, "// game features unavailable", "application/javascript")
@@ -1318,6 +1318,21 @@ def run_gui(host, start_port, gui_smoke_test=False):
 
             def on_loaded():
               print("[gui] Embedded game page loaded.", flush=True)
+              if gui_smoke_test:
+                try:
+                  interaction_ok = bool(window.evaluate_js("""(() => {
+                    const menuButton = Array.from(document.querySelectorAll('#menu button'))
+                      .find(button => button.textContent.trim() === 'Modes & features');
+                    if (!menuButton) return false;
+                    menuButton.click();
+                    const panel = document.getElementById('feature-panel');
+                    const modeTab = document.querySelector('[data-feature-tab="modes"]');
+                    return Boolean(panel && panel.classList.contains('on') && modeTab && modeTab.getAttribute('aria-selected') === 'true');
+                  })()"""))
+                except Exception:
+                  interaction_ok = False
+                message = "passed" if interaction_ok else "failed"
+                print(f"[gui] Mission Control interaction {message}.", flush=True)
 
             window.events.loaded += on_loaded
             webview.start(gui="qt", debug=False)
