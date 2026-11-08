@@ -43,6 +43,7 @@ jobs:
           --collect-all PySide6
           --name NeonSwarm
           --add-data "MATADORA (Sped Up).mp3;."
+          --add-data "neon_features.js;."
           neon_swarm.py
 
       - name: Smoke-test the executable

@@ -268,6 +268,9 @@ def build_zip(tool_directory, python_executable, git_executable):
     audio = source / "MATADORA (Sped Up).mp3"
     if not audio.is_file():
         raise FileNotFoundError(f"The repository source is missing the bundled audio: {audio}")
+    features_script = source / "neon_features.js"
+    if not features_script.is_file():
+        raise FileNotFoundError(f"The repository source is missing game features: {features_script}")
 
     venv = work / "venv"
     build_directory = work / "build"
@@ -306,6 +309,8 @@ def build_zip(tool_directory, python_executable, git_executable):
             str(work),
             "--add-data",
             f"{audio};.",
+            "--add-data",
+            f"{features_script};.",
             "neon_swarm.py",
         ],
         cwd=source,

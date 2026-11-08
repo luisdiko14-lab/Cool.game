@@ -31,7 +31,7 @@ else:
   APP_DIR = Path(__file__).resolve().parent
 DB = APP_DIR / "neon_swarm_scores.json"
 SAVES_DB = APP_DIR / "neon_swarm_saves.json"
-SAVE_KEYS = {"neonswarm.scores", "neonswarm.profile", "neonswarm.settings", "neonswarm.admin", "neonswarm.arcade"}
+SAVE_KEYS = {"neonswarm.scores", "neonswarm.profile", "neonswarm.settings", "neonswarm.admin", "neonswarm.arcade", "neonswarm.features"}
 LOCK = threading.Lock()
 LAST_POST = {}  # client ip -> time of last score submission (simple rate limit)
 LAST_SAVE_POST = {}
@@ -100,6 +100,18 @@ input:focus{border-color:var(--cyan)}
 .racer-message{position:absolute;z-index:2;left:50%;top:45%;transform:translate(-50%,-50%);width:min(80vw,500px);color:#fff;text-shadow:0 2px 8px #000;pointer-events:none}
 body.low-pixels canvas{image-rendering:pixelated}
 #admin-damage{width:100%;min-width:0}
+.career-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;width:min(620px,94vw)}
+.career-stat{min-width:0;padding:10px;border:1px solid rgba(61,245,255,.32);border-radius:8px;background:rgba(17,8,43,.82);text-align:left}
+.career-stat span{display:block;color:var(--dim);font-size:11px}
+.career-stat strong{display:block;margin-top:3px;color:var(--cyan);font-size:20px}
+.achievement-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:min(620px,94vw);max-height:38vh;overflow:auto;text-align:left}
+.achievement{min-width:0;padding:10px;border:1px solid rgba(165,146,214,.28);border-radius:8px;background:rgba(17,8,43,.72)}
+.achievement.unlocked{border-color:rgba(61,245,255,.68);box-shadow:inset 0 0 12px rgba(61,245,255,.08)}
+.achievement strong{display:block;color:var(--ink);font-size:13px}
+.achievement small{display:block;margin-top:3px;color:var(--dim);font-size:11px}
+.achievement-progress{height:4px;margin-top:9px;border-radius:4px;background:rgba(255,255,255,.1);overflow:hidden}
+.achievement-progress i{display:block;height:100%;background:var(--cyan)}
+.achievement-status{display:block;margin-top:5px;color:var(--cyan);font-size:9px;font-weight:800}
 .arcade-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;width:min(560px,94vw)}
 .arcade-game{min-height:88px;padding:12px 8px;border-radius:8px;font-size:16px}
 .arcade-game small{display:block;color:var(--dim);font-size:12px}
@@ -128,6 +140,8 @@ body.low-pixels canvas{image-rendering:pixelated}
   p{font-size:14px;max-width:32ch}
   .shop-grid{grid-template-columns:repeat(2,minmax(0,1fr));max-height:42vh}
   #menu #play,#menu #settings-open{min-height:48px}
+  .career-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .achievement-grid{grid-template-columns:1fr;max-height:34vh}
   body.playing #touch-controls{position:absolute;z-index:5;inset:auto 18px 22px;display:flex;justify-content:space-between;align-items:end;pointer-events:none}
   #move-pad{position:relative;width:124px;height:124px;border:2px solid rgba(61,245,255,.48);border-radius:50%;background:rgba(13,5,36,.52);box-shadow:inset 0 0 24px rgba(61,245,255,.16);touch-action:none;pointer-events:auto}
   #move-pad span{position:absolute;inset:8px 0 auto;text-align:center;color:var(--dim);font-size:10px;pointer-events:none}
@@ -148,14 +162,16 @@ body.low-pixels canvas{image-rendering:pixelated}
 <p>Move with WASD, arrow keys or by dragging. Dash with Space, Shift or a quick tap. P pauses and M mutes.</p>
 <p id="profile"></p><p id="save-status" role="status" aria-live="polite">Progress saves in this browser for this site address.</p><div id="skins" aria-label="Ship skins"></div>
 <ol class="board" id="b0"></ol>
+<button class="alt" id="records-open-menu" type="button">Pilot records</button>
 <button class="alt" id="shop-open-menu" type="button">Shop</button>
 <button class="alt" id="settings-open" type="button">Settings</button>
 <button class="alt" id="games-open-menu" type="button">Other games!</button>
 <button class="alt" id="admin-open-menu" type="button">Admin commands</button>
 <button id="play">Start run</button>
 </section>
-<section class="panel" id="pause"><h2>Paused</h2><button id="resume">Resume</button><button class="alt" id="shop-open-pause" type="button">Shop</button><button class="alt" id="settings-pause" type="button">Settings</button><button class="alt" id="games-open-pause" type="button">Other games!</button><button class="alt" id="admin-open-pause" type="button">Admin commands</button><button class="alt" id="quit">Quit to menu</button></section>
+<section class="panel" id="pause"><h2>Paused</h2><button id="resume">Resume</button><button class="alt" id="records-open-pause" type="button">Pilot records</button><button class="alt" id="shop-open-pause" type="button">Shop</button><button class="alt" id="settings-pause" type="button">Settings</button><button class="alt" id="games-open-pause" type="button">Other games!</button><button class="alt" id="admin-open-pause" type="button">Admin commands</button><button class="alt" id="quit">Quit to menu</button></section>
 <section class="panel" id="settings"><h2>Settings</h2><label class="setting-row"><span>Music</span><input id="music-enabled" type="checkbox"></label><label class="setting-row"><span>Music volume</span><input id="music-volume" type="range" min="0" max="100" value="35"></label><label class="setting-row"><span>Effects volume</span><input id="effects-volume" type="range" min="0" max="100" value="65"></label><label class="setting-row"><span>Frame cap <output id="fps-cap-value">60</output> FPS</span><input id="fps-cap" type="range" min="20" max="1000" step="10" value="60"></label><label class="setting-row"><span>FPS counter</span><input id="fps-visible" type="checkbox"></label><label class="setting-row"><span>Resolution quality</span><select id="resolution"><option value="240">240p - Low (no FX/music)</option><option value="340">340p - Low (no FX/music)</option><option value="480">480p</option><option value="720">720p</option><option value="1080">1080p</option><option value="1440">1440p (2K HD)</option><option value="2160">2160p (4K Ultra HD)</option><option value="4320">4320p (8K Ultra HD+)</option></select></label><p>FPS is limited by your display/browser. Resolution changes in-game rendering quality, not your monitor, and may be capped by device memory.</p><button class="alt" id="settings-close" type="button">Done</button></section>
+<section class="panel" id="records"><h2>Pilot records</h2><p id="records-summary"></p><div class="career-grid"><div class="career-stat"><span>Sorties</span><strong id="career-runs">0</strong></div><div class="career-stat"><span>Campaign wins</span><strong id="career-wins">0</strong></div><div class="career-stat"><span>Best wave</span><strong id="career-wave">0</strong></div><div class="career-stat"><span>Best score</span><strong id="career-score">0</strong></div><div class="career-stat"><span>Eliminations</span><strong id="career-kills">0</strong></div><div class="career-stat"><span>Bosses defeated</span><strong id="career-bosses">0</strong></div></div><div class="achievement-grid" id="achievement-list"></div><button class="alt" id="records-close" type="button">Back</button></section>
 <section class="panel" id="shop"><h2>Hangar shop</h2><p id="shop-balance"></p><p>Earn credits by clearing waves. Buy a ship, then equip it here or from the quick-select row.</p><div class="shop-grid" id="shop-grid"></div><button class="alt" id="shop-close" type="button">Back</button></section>
 <section class="panel" id="admin-lock"><h2>Admin Access</h2><label class="setting-row"><span>Password</span><input id="admin-password" type="password" inputmode="numeric" autocomplete="off" maxlength="16"></label><p id="admin-lock-status" role="status" aria-live="polite"></p><button id="admin-unlock" type="button">Unlock</button><button class="alt" id="admin-lock-close" type="button">Back</button></section>
 <section class="panel" id="admin"><h2>Admin Commands</h2><p>Local gameplay overrides. These controls are not secure server administration.</p><label class="setting-row"><span>Shield duration (seconds)</span><input id="admin-shield-duration" type="number" min="1" max="100" step="1" value="10"></label><button id="admin-grant-shield" type="button">Grant shield</button><label class="setting-row"><span>Fire rate <output id="admin-fire-rate-value">10</output> shots/sec</span><input id="admin-fire-rate" type="range" min="1" max="50" step="1" value="10"></label><label class="setting-row"><span>Damage per shot <output id="admin-damage-value">500</output></span><input id="admin-damage" type="number" min="1" max="10000000" step="1" value="500"></label><label class="setting-row"><span>XP multi (max 10,000x)</span><input id="admin-xp-multiplier" type="number" min="1" max="10000" step="1" value="1"></label><p id="admin-status" role="status" aria-live="polite"></p><button class="alt" id="admin-close" type="button">Done</button></section>
@@ -196,7 +212,7 @@ const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const cv=$('c'),ctx=cv.getContext('2d');
 let view={cw:1,ch:1,dpr:1,s:1,w:VIEW,h:VIEW},bg;
 
-const SavedData={keys:['neonswarm.scores','neonswarm.profile','neonswarm.settings','neonswarm.admin','neonswarm.arcade'],id:null,timer:null,
+const SavedData={keys:['neonswarm.scores','neonswarm.profile','neonswarm.settings','neonswarm.admin','neonswarm.arcade','neonswarm.features'],id:null,timer:null,
   async init(){try{this.id=localStorage.getItem('neonswarm.save-id');if(!/^[a-f0-9]{32}$/.test(this.id||'')){this.id=crypto.randomUUID().replace(/-/g,'');localStorage.setItem('neonswarm.save-id',this.id)}}catch(e){return}
     const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),4000);
     try{const response=await fetch('/api/saves',{headers:{'X-Save-Token':this.id},signal:controller.signal});if(!response.ok)return;const result=await response.json();for(const key of this.keys)if(localStorage.getItem(key)===null&&result.data&&result.data[key]!==undefined)localStorage.setItem(key,JSON.stringify(result.data[key]))}catch(e){}finally{clearTimeout(timeout)}},
@@ -212,7 +228,9 @@ const Store={key:'neonswarm.scores',
   submit(name,score){const a=this.load().filter(v=>!(v.n==='Player'&&v.s===score));a.push({n:name,s:score});a.sort((x,y)=>y.s-x.s);return this.save(a.slice(0,5))?this.load():null}};
 const Profile={key:'neonswarm.profile',data:null,
   init(){let saved={};try{saved=JSON.parse(localStorage.getItem(this.key))||{}}catch(e){}
-    this.data={credits:Number.isFinite(saved.credits)?Math.max(0,saved.credits):0,unlocked:Array.isArray(saved.unlocked)?saved.unlocked.filter(id=>SKINS.some(s=>s.id===id)):['cyan'],skin:SKINS.some(s=>s.id===saved.skin)?saved.skin:'cyan'};
+    const career=saved.career&&typeof saved.career==='object'?saved.career:{};
+    const count=value=>Number.isSafeInteger(value)&&value>=0?value:0;
+    this.data={credits:Number.isFinite(saved.credits)?Math.max(0,saved.credits):0,unlocked:Array.isArray(saved.unlocked)?saved.unlocked.filter(id=>SKINS.some(s=>s.id===id)):['cyan'],skin:SKINS.some(s=>s.id===saved.skin)?saved.skin:'cyan',career:{runs:count(career.runs),wins:count(career.wins),bestWave:count(career.bestWave),bestScore:count(career.bestScore),kills:count(career.kills),bossKills:count(career.bossKills)}};
     if(!this.data.unlocked.includes('cyan'))this.data.unlocked.push('cyan');this.save();this.render()},
   save(){try{localStorage.setItem(this.key,JSON.stringify(this.data));$('save-status').textContent='Progress saves in this browser for this site address.';SavedData.schedule();return true}catch(e){$('save-status').textContent='Browser storage is unavailable; progress may not persist.';return false}},
   item(){return SKINS.find(s=>s.id===this.data.skin)||SKINS[0]},
@@ -232,7 +250,25 @@ const Profile={key:'neonswarm.profile',data:null,
     if(!this.data.unlocked.includes(id)){if(skin.winOnly||this.data.credits<skin.cost)return false;this.data.credits-=skin.cost;this.data.unlocked.push(id)}
     return true},
   reward(wave){this.data.credits+=wave*150;this.save();this.render()},
-  victory(){if(!this.data.unlocked.includes('nova'))this.data.unlocked.push('nova');this.data.credits+=750;this.save();this.render()}};
+  startRun(){this.data.career.runs++;this.save()},
+  recordKill(enemy){this.data.career.kills++;if(enemy.k==='boss')this.data.career.bossKills++},
+  recordWave(wave){this.data.career.bestWave=Math.max(this.data.career.bestWave,wave);this.save()},
+  recordScore(score){this.data.career.bestScore=Math.max(this.data.career.bestScore,score);this.save()},
+  victory(){this.data.career.wins++;if(!this.data.unlocked.includes('nova'))this.data.unlocked.push('nova');this.data.credits+=750;this.save();this.render()}};
+const Records={returnTo:'menu',
+  open(from){this.returnTo=from;this.render();Game.set('records')},
+  close(){Game.set(this.returnTo)},
+  render(){const c=Profile.data.career,achievements=[
+    {title:'First sortie',detail:'Launch your first run.',value:c.runs,goal:1},
+    {title:'Swarm breaker',detail:'Eliminate 100 enemies.',value:c.kills,goal:100},
+    {title:'Front-line pilot',detail:'Reach wave 10.',value:c.bestWave,goal:10},
+    {title:'Boss hunter',detail:'Defeat 5 bosses.',value:c.bossKills,goal:5},
+    {title:'Deep-space veteran',detail:'Reach wave 30.',value:c.bestWave,goal:30},
+    {title:'Final signal',detail:'Complete the campaign.',value:c.wins,goal:1}
+  ];
+    $('career-runs').textContent=c.runs.toLocaleString();$('career-wins').textContent=c.wins.toLocaleString();$('career-wave').textContent=c.bestWave.toLocaleString();$('career-score').textContent=c.bestScore.toLocaleString();$('career-kills').textContent=c.kills.toLocaleString();$('career-bosses').textContent=c.bossKills.toLocaleString();
+    const earned=achievements.filter(item=>item.value>=item.goal).length;$('records-summary').textContent='CAREER FILE  /  '+earned+' OF '+achievements.length+' ACHIEVEMENTS';
+    const host=$('achievement-list');host.replaceChildren();for(const item of achievements){const unlocked=item.value>=item.goal,card=document.createElement('div');card.className='achievement'+(unlocked?' unlocked':'');const title=document.createElement('strong');title.textContent=item.title;const detail=document.createElement('small');detail.textContent=item.detail;const progress=document.createElement('div');progress.className='achievement-progress';const fill=document.createElement('i');fill.style.width=Math.min(100,item.value/item.goal*100)+'%';progress.append(fill);const status=document.createElement('span');status.className='achievement-status';status.textContent=unlocked?'UNLOCKED':Math.min(item.value,item.goal).toLocaleString()+' / '+item.goal.toLocaleString();card.append(title,detail,progress,status);host.append(card)}}};
 const Shop={returnTo:'menu',
   open(from){this.returnTo=from;Profile.render();Game.set('shop')},
   close(){Game.set(this.returnTo)}};
@@ -332,7 +368,7 @@ const Input={keys:{},ptr:null,dash:false,
       if(m>8){const f=Math.min(1,m/45)/m;return{x:dx*f,y:dy*f}}}
     return{x:0,y:0}},
   bind(){
-    addEventListener('keydown',e=>{const k=e.code;if(Game.state==='racer'){if(k==='Escape'){MiniGames.showHub();return}if(k.startsWith('Arrow'))e.preventDefault();Racer.key(k,true);return}if(['snake','game2048','memory'].includes(Game.state)){if(k.startsWith('Arrow'))e.preventDefault();MiniGames.key(k);return}if(e.target.tagName==='INPUT'){if(k==='Enter'){if(e.target.id==='admin-password')Admin.unlock();else if(e.target.id==='nm')$('sub').click()}return}if(k.startsWith('Arrow')||k==='Space')e.preventDefault();this.keys[k]=true;Sfx.init();
+    addEventListener('keydown',e=>{const k=e.code;if(Game.state==='records'&&k==='Escape'){Records.close();return}if(Game.state==='racer'){if(k==='Escape'){MiniGames.showHub();return}if(k.startsWith('Arrow'))e.preventDefault();Racer.key(k,true);return}if(['snake','game2048','memory'].includes(Game.state)){if(k.startsWith('Arrow'))e.preventDefault();MiniGames.key(k);return}if(e.target.tagName==='INPUT'){if(k==='Enter'){if(e.target.id==='admin-password')Admin.unlock();else if(e.target.id==='nm')$('sub').click()}return}if(k.startsWith('Arrow')||k==='Space')e.preventDefault();this.keys[k]=true;Sfx.init();
       if(k==='Space'||k.startsWith('Shift'))this.dash=true;
       if(k==='KeyP'||k==='Escape')Game.state==='play'?Game.pause():Game.resume();
       if(k==='Enter'&&(Game.state==='menu'||Game.state==='over'))Game.start();
@@ -361,13 +397,13 @@ const Game={state:'menu',time:0,best:0,p:null,
   reset(){Object.assign(this,{score:0,combo:0,comboT:0,mult:1,wave:1,betweenWaves:false,waveDelay:0,xp:0,totalXp:0,need:8,lvl:1,timeScale:1,dieT:0,hitT:0,enemies:[],bullets:[],eb:[],gems:[],pu:[],won:false});this.refreshMultiplier();
     this.p={x:view.w/2,y:view.h*.82,vx:0,vy:0,r:11,hp:200,maxHp:200,fireT:.12,dashT:0,dashCd:0,inv:1,aim:-1.57,face:-1.57,dx:0,dy:-1,dead:false,shield:0,rapid:0};
     FX.parts=[];FX.texts=[];FX.rings=[];FX.shake=0;FX.flash=0},
-  set(s){this.state=s;for(const id of['menu','pause','over','settings','shop','admin-lock','admin','games','snake','game2048','memory','racer'])$(id).classList.toggle('on',id===s);$('pb').style.display=s==='play'?'block':'none';document.body.classList.toggle('playing',s==='play');
+  set(s){this.state=s;for(const id of['menu','pause','over','settings','shop','records','admin-lock','admin','games','snake','game2048','memory','racer'])$(id).classList.toggle('on',id===s);$('pb').style.display=s==='play'?'block':'none';document.body.classList.toggle('playing',s==='play');
     if(document.activeElement&&document.activeElement.blur)document.activeElement.blur()},
-  start(){Sfx.init();Settings.startMusic();Input.dash=false;Input.ptr=null;this.reset();if(Admin.pendingShield){this.p.shield=Admin.pendingShield;Admin.pendingShield=0}this.spawnWave();Sfx.play('start');FX.text(view.w/2,view.h*.3,'Wave 1 / '+MAX_WAVE,COL.cyan,34);this.set('play')},
+  start(){Sfx.init();Settings.startMusic();Input.dash=false;Input.ptr=null;this.reset();Profile.startRun();if(Admin.pendingShield){this.p.shield=Admin.pendingShield;Admin.pendingShield=0}this.spawnWave();Sfx.play('start');FX.text(view.w/2,view.h*.3,'Wave 1 / '+MAX_WAVE,COL.cyan,34);this.set('play')},
   pause(){if(this.state==='play'){Input.ptr=null;this.set('pause')}},
   resume(){if(this.state==='pause'){Input.dash=false;this.set('play')}},
   goMenu(){this.p=null;board($('b0'),Store.load(),-1);Net.get().then(s=>s&&board($('b0'),s,-1));this.set('menu')},
-  over(){const list=Store.load(),hi=this.score>0&&this.score>(list[0]?.s||0);
+  over(){Profile.recordScore(this.score);const list=Store.load(),hi=this.score>0&&this.score>(list[0]?.s||0);
     const localSaved=this.score>0?Store.submit('Player',this.score):false;this.best=Store.load()[0]?.s||0;
     $('ovt').textContent=this.won?'Campaign complete!':hi?'New best score!':'Signal lost';$('sc').textContent='Score '+this.score.toLocaleString()+', reached wave '+this.wave+' / '+MAX_WAVE;
     board($('b1'),Store.load(),this.score);Sfx.play(hi?'win':'lose');$('sv').hidden=this.score<=0;$('submit-status').textContent=this.score>0?(localSaved?(Net.on?'Saved on this device. Add your name to the shared leaderboard.':'Saved on this device. The shared leaderboard is unavailable.'):'Browser storage is unavailable; try saving to the shared leaderboard.') :'';$('sub').disabled=false;try{$('nm').value=localStorage.getItem('neonswarm.name')||$('nm').value}catch(e){}this.set('over')},
@@ -447,10 +483,10 @@ const Game={state:'menu',time:0,best:0,p:null,
     kinds.forEach((k,i)=>{const row=Math.floor(i/cols),rowKinds=Math.min(cols,kinds.length-row*cols),col=i%cols,gap=Math.min(110,(W-100)/Math.max(1,rowKinds-1));this.add(k,W/2+(col-(rowKinds-1)/2)*gap,startY+row*rowGap)})},
   refreshMultiplier(){const xpBonus=Math.floor(this.totalXp/10)*(Admin.unlocked?Admin.config.xpMultiplier:1);this.mult=Math.min(10000,1+xpBonus+Math.floor(this.combo/5))},
   awardScore(points){const earned=points*50;this.score+=earned;return earned},
-  clearWave(){this.betweenWaves=true;this.waveDelay=2;const reward=this.wave*150;this.awardScore(this.wave*250*this.mult);Profile.reward(this.wave);FX.text(view.w/2,view.h*.32,'WAVE CLEAR  +'+reward+' CREDITS',COL.gold,25)},
+  clearWave(){this.betweenWaves=true;this.waveDelay=2;const reward=this.wave*150;this.awardScore(this.wave*250*this.mult);Profile.recordWave(this.wave);Profile.reward(this.wave);FX.text(view.w/2,view.h*.32,'WAVE CLEAR  +'+reward+' CREDITS',COL.gold,25)},
   victory(){this.won=true;this.awardScore(2500*this.mult);Profile.victory();this.over()},
   damage(e,n){if(e.k==='boss'&&(this.wave===30||this.wave===50||this.wave===MAX_WAVE)){if(this.time<(e.nextHitAt||0))return;e.nextHitAt=this.time+.15}e.hp-=n;e.flash=.08;if(this.time-this.hitT>.05){this.hitT=this.time;Sfx.play('hit')}if(e.hp<=0&&!e.dead)this.kill(e)},
-  kill(e){e.dead=true;const T=TYPES[e.k],old=this.mult;
+  kill(e){e.dead=true;Profile.recordKill(e);const T=TYPES[e.k],old=this.mult;
     this.combo++;this.comboT=2.6;this.refreshMultiplier();
     const pts=this.awardScore(T.pts*this.mult);
     FX.burst(e.x,e.y,T.col,T.n*5,300,.7,3.2);FX.burst(e.x,e.y,'#fff',6,200,.35,2);FX.hit(e.k==='tank'?9:4);Sfx.play('boom');
@@ -624,6 +660,7 @@ function frame(t){requestAnimationFrame(frame);const interval=1000/Settings.data
 addEventListener('resize',resize);
 $('play').onclick=()=>Game.start();$('again').onclick=()=>Game.start();$('resume').onclick=()=>Game.resume();
 $('quit').onclick=()=>Game.goMenu();$('home').onclick=()=>Game.goMenu();$('pb').onclick=()=>Game.pause();
+$('records-open-menu').onclick=()=>Records.open('menu');$('records-open-pause').onclick=()=>Records.open('pause');$('records-close').onclick=()=>Records.close();
 $('settings-open').onclick=()=>Settings.open('menu');$('settings-pause').onclick=()=>Settings.open('pause');$('settings-close').onclick=()=>Settings.close();
 $('shop-open-menu').onclick=()=>Shop.open('menu');$('shop-open-pause').onclick=()=>Shop.open('pause');$('shop-close').onclick=()=>Shop.close();
 $('games-open-menu').onclick=()=>MiniGames.open('menu');$('games-open-pause').onclick=()=>MiniGames.open('pause');$('games-back').onclick=()=>MiniGames.exit();document.querySelectorAll('[data-games-back]').forEach(button=>button.onclick=()=>MiniGames.showHub());
@@ -655,8 +692,10 @@ $('sub').onclick=async()=>{const n=$('nm').value.trim().slice(0,12)||'Player';$(
   if(shared){board($('b1'),shared,Game.score);$('submit-status').textContent=local?'Saved to the shared leaderboard.':'Shared score saved; browser storage is unavailable.'}
   else if(local){board($('b1'),local,Game.score);$('submit-status').textContent='Saved on this device. The shared leaderboard is unavailable.'}
   else $('submit-status').textContent='Could not save this score. Check browser storage or the server.'};
+window.NeonSwarmCore={Game,Profile,Settings,Input,FX,Sfx,TYPES,PAT,BOSS_HP,MAX_WAVE,getView:()=>view,canvas:cv,savedData:typeof SavedData==='undefined'?null:SavedData};
 SavedData.init().finally(()=>{Profile.init();Settings.init();Admin.init();MiniGames.init();Racer.init();Input.bind();resize();Game.best=Store.load()[0]?.s||0;board($('b0'),Store.load(),-1);Net.get().then(s=>s&&board($('b0'),s,-1));requestAnimationFrame(frame)});
 </script>
+<script src="/neon_features.js"></script>
 </body>
 </html>
 '''
@@ -741,6 +780,12 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(parsed.path)
         if path in ("/", "/index.html"):
             self.send_body(200, GAME_HTML, "text/html")
+        elif path == "/neon_features.js":
+          try:
+            features = Path(__file__).resolve().with_name("neon_features.js").read_text(encoding="utf-8")
+            self.send_body(200, features, "application/javascript")
+          except OSError:
+            self.send_body(404, "// game features unavailable", "application/javascript")
         elif path == "/api/scores":
             self.send_body(200, json.dumps({"scores": load_scores()}))
         elif path == "/api/saves":
@@ -983,7 +1028,7 @@ def run_gui(host, start_port, gui_smoke_test=False):
             import webview
 
             window = webview.create_window(
-                "Neon Swarm",
+                "Neon Swarm v2",
                 url,
                 width=1100,
                 height=760,
