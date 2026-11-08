@@ -1316,23 +1316,38 @@ def run_gui(host, start_port, gui_smoke_test=False):
                 min_size=(640, 480),
             )
 
+            def verify_mission_control():
+              try:
+                result = window.evaluate_js("""(() => {
+                  const menuButton = Array.from(document.querySelectorAll('#menu button'))
+                    .find(button => button.textContent.trim() === 'Modes & features');
+                  if (!menuButton) return 'missing-menu-button';
+                  menuButton.click();
+                  const panel = document.getElementById('feature-panel');
+                  if (!panel) return 'missing-feature-panel';
+                  if (!panel.classList.contains('on')) return 'feature-panel-not-open';
+                  const modeTab = document.querySelector('[data-feature-tab="modes"]');
+                  if (!modeTab) return 'missing-modes-tab';
+                  if (modeTab.getAttribute('aria-selected') !== 'true') return 'modes-tab-not-selected';
+                  return 'passed';
+                })()""")
+              except Exception as error:
+                print(
+                  f"[gui] Mission Control evaluation error ({type(error).__name__}: {error}).",
+                  flush=True,
+                )
+                return
+              if result == "passed":
+                print("[gui] Mission Control interaction passed.", flush=True)
+              else:
+                print(f"[gui] Mission Control interaction failed. Result: {result!r}.", flush=True)
+
             def on_loaded():
               print("[gui] Embedded game page loaded.", flush=True)
               if gui_smoke_test:
-                try:
-                  interaction_ok = bool(window.evaluate_js("""(() => {
-                    const menuButton = Array.from(document.querySelectorAll('#menu button'))
-                      .find(button => button.textContent.trim() === 'Modes & features');
-                    if (!menuButton) return false;
-                    menuButton.click();
-                    const panel = document.getElementById('feature-panel');
-                    const modeTab = document.querySelector('[data-feature-tab="modes"]');
-                    return Boolean(panel && panel.classList.contains('on') && modeTab && modeTab.getAttribute('aria-selected') === 'true');
-                  })()"""))
-                except Exception:
-                  interaction_ok = False
-                message = "passed" if interaction_ok else "failed"
-                print(f"[gui] Mission Control interaction {message}.", flush=True)
+                timer = threading.Timer(0.5, verify_mission_control)
+                timer.daemon = True
+                timer.start()
 
             window.events.loaded += on_loaded
             webview.start(gui="qt", debug=False)
