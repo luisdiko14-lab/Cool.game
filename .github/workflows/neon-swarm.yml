@@ -1,6 +1,6 @@
 name: Neon Swarm
 
-# ONE FILE. Nothing else is needed in the repo except neon_swarm.py.
+# Runtime files: neon_swarm.py, auth.py, and requirements.txt.
 # The helper scripts (supervisor, tunnel, waking page) are written out by the
 # "Write helper scripts" step below, so there are no files that can go missing.
 #
@@ -86,8 +86,8 @@ jobs:
           LEGS_INPUT: ${{ github.event.inputs.legs || '130' }}
         run: |
           set -euo pipefail
-          test -f neon_swarm.py || { echo "::error::neon_swarm.py is missing from the repo root"; exit 1; }
-          python -m py_compile neon_swarm.py
+          test -f neon_swarm.py && test -f auth.py || { echo "::error::Neon Swarm server files are missing"; exit 1; }
+          python -m py_compile neon_swarm.py auth.py
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os
           legs = int(float(os.environ["LEGS_INPUT"]))
@@ -266,7 +266,7 @@ jobs:
 
       - name: Check the game imports before the leg starts
         run: |
-          python -m py_compile neon_swarm.py
+          python -m py_compile neon_swarm.py auth.py
           python - <<'PY'
           import importlib
           for mod in ["flask", "numpy", "pygame", "psutil"]:
@@ -749,6 +749,9 @@ jobs:
         env:
           LEG: ${{ matrix.leg }}
           LEGS_TOTAL: ${{ needs.plan.outputs.legs }}
+          NEON_SWARM_DATA_KEY: ${{ secrets.NEON_SWARM_DATA_KEY }}
+          NEON_SWARM_ACCOUNT_DB: ${{ github.workspace }}/.neon-state/accounts.enc
+          NEON_SWARM_SAVE_DB: ${{ github.workspace }}/.neon-state/saves.enc
         run: bash "$RUNNER_TEMP/neon/bin/supervise.sh"
 
       - name: Stop the tunnel and waking page (frees the link for the next leg)
@@ -780,10 +783,10 @@ jobs:
           PUSHER_EMAIL: ${{ github.event.inputs.pusher_email || 'save.data@github.com' }}
         run: |
           set -euo pipefail
-          for data_file in neon_swarm_scores.json neon_swarm_saves.json; do
+          for data_file in neon_swarm_scores.json; do
             if [ -f "$data_file" ]; then git add -- "$data_file"; fi
           done
-          if git diff --cached --quiet -- neon_swarm_scores.json neon_swarm_saves.json; then
+          if git diff --cached --quiet -- neon_swarm_scores.json; then
             echo "::notice::No new saved data in leg ${LEG}; repository files are unchanged."
             echo "- Saved data: no changes; repository files unchanged" >> "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -824,7 +827,7 @@ jobs:
           STATE="$RUNNER_TEMP/neon"
           STAGE="$RUNNER_TEMP/repo-snapshot"
           rm -rf "$STAGE" && mkdir -p "$STAGE/logs"
-          rsync -a --exclude='.git/' --exclude='__pycache__/' --exclude='.venv/' --exclude='venv/' --exclude='node_modules/' ./ "$STAGE/"
+          rsync -a --exclude='.git/' --exclude='.neon-state/' --exclude='__pycache__/' --exclude='.venv/' --exclude='venv/' --exclude='node_modules/' ./ "$STAGE/"
           for f in events.log tunnel.log; do cp "$STATE/$f" "$STAGE/logs/" 2>/dev/null; done
           gzip -c "$STATE/game.log" > "$STAGE/logs/game.log.gz" 2>/dev/null
           cd "$STAGE" && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS.txt

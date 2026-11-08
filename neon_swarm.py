@@ -4,33 +4,77 @@
 Run:  python neon_swarm.py            (opens http://localhost:8000)
       python neon_swarm.py --lan      (also reachable from phones on your Wi-Fi)
 
-Standard library only (Python 3.7+). The game page is embedded below, and the
-server adds a shared leaderboard saved next to this file in neon_swarm_scores.json.
-Scores are reported by the browser, so treat the leaderboard as friendly, not tamper-proof.
+Python 3.7+; encrypted account and save storage uses the cryptography package.
+The game page is embedded below, and the server adds a shared leaderboard saved
+next to this file in neon_swarm_scores.json. Scores are browser-reported, so treat
+the leaderboard as friendly, not tamper-proof.
 """
 import argparse
 import hashlib
 import json
+import os
 import re
+import secrets
 import socket
 import sys
 import threading
 import time
 import traceback
 import webbrowser
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import URLError
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 from urllib.request import urlopen
+
+import auth as authlib
 
 if getattr(sys, "frozen", False):
   APP_DIR = Path.home() / "Desktop" if sys.platform == "win32" else Path(sys.executable).resolve().parent
   APP_DIR.mkdir(parents=True, exist_ok=True)
 else:
   APP_DIR = Path(__file__).resolve().parent
+
+ENV_FILE_KEYS = {"NEON_SWARM_DATA_KEY", "NEON_SWARM_ACCOUNT_DB", "NEON_SWARM_SAVE_DB"}
+
+
+def load_env_file(path):
+  try:
+    lines = path.read_text(encoding="utf-8").splitlines()
+  except OSError:
+    return
+  for line in lines:
+    line = line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+      continue
+    name, value = line.split("=", 1)
+    name, value = name.strip(), value.strip()
+    if name not in ENV_FILE_KEYS:
+      continue
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+      value = value[1:-1]
+    os.environ.setdefault(name, value)
+
+
+load_env_file(APP_DIR / ".env")
+DATA_DIR = authlib.user_data_dir()
+try:
+  DATA_KEY = authlib.load_data_key(DATA_DIR)
+except (RuntimeError, ValueError) as error:
+  DATA_KEY = None
+  print(f"[auth] Encrypted account storage is unavailable ({type(error).__name__}).", flush=True)
+ACCOUNT_DB = Path(os.environ.get("NEON_SWARM_ACCOUNT_DB", DATA_DIR / "accounts.enc"))
+SAVES_DB = Path(os.environ.get("NEON_SWARM_SAVE_DB", DATA_DIR / "saves.enc"))
+LEGACY_SAVES_DB = APP_DIR / "neon_swarm_saves.json"
+ACCOUNTS = authlib.AccountStore(ACCOUNT_DB, DATA_KEY) if DATA_KEY else None
+SESSIONS = authlib.SessionStore()
+AUTH_ATTEMPTS = {}
+AUTH_ATTEMPTS_LOCK = threading.Lock()
+ACTIVE_PORT = None
+
+
 DB = APP_DIR / "neon_swarm_scores.json"
-SAVES_DB = APP_DIR / "neon_swarm_saves.json"
 SAVE_KEYS = {"neonswarm.scores", "neonswarm.profile", "neonswarm.settings", "neonswarm.admin", "neonswarm.arcade", "neonswarm.features"}
 LOCK = threading.Lock()
 LAST_POST = {}  # client ip -> time of last score submission (simple rate limit)
@@ -58,6 +102,7 @@ p{margin:0;max-width:36ch;color:var(--dim)}
 #sc{font-size:20px;font-weight:800;color:var(--gold)}
 button{font:800 18px "Syne","Trebuchet MS",system-ui,sans-serif;color:var(--ink);background:rgba(61,245,255,.08);border:2px solid var(--cyan);border-radius:999px;padding:12px 36px;cursor:pointer;box-shadow:0 0 14px rgba(61,245,255,.45),inset 0 0 14px rgba(61,245,255,.2);transition:transform .12s,box-shadow .12s}
 button:hover,button:focus-visible{transform:scale(1.06);box-shadow:0 0 30px var(--cyan),inset 0 0 18px rgba(61,245,255,.35);outline:none}
+button:disabled{opacity:.5;cursor:not-allowed}
 button.alt,#pb{border-color:var(--vio);box-shadow:0 0 12px rgba(155,92,255,.5);padding:8px 24px;font-size:15px}
 #pb{position:absolute;top:10px;right:96px;display:none;padding:6px 16px}
 .board{margin:0;padding:0;list-style:none;counter-reset:r;width:min(260px,80vw)}
@@ -71,6 +116,7 @@ button.alt,#pb{border-color:var(--vio);box-shadow:0 0 12px rgba(155,92,255,.5);p
 input{font:600 16px "Syne","Trebuchet MS",system-ui,sans-serif;color:var(--ink);background:rgba(13,5,36,.8);border:2px solid var(--vio);border-radius:999px;padding:8px 16px;text-align:center;width:min(220px,60vw);outline:none;-webkit-user-select:text;user-select:text}
 input:focus{border-color:var(--cyan)}
 #profile{color:var(--gold);font-size:14px}
+#account-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 #skins{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center;min-height:42px;max-width:min(360px,90vw)}
 .skin{width:36px;height:36px;min-width:36px;padding:0;border:2px solid rgba(255,255,255,.45);border-radius:50%;background:var(--swatch);box-shadow:none}
 .skin.selected{border-color:#fff;outline:2px solid var(--swatch);outline-offset:3px}
@@ -155,27 +201,27 @@ body.low-pixels canvas{image-rendering:pixelated}
 <div id="fps-counter" hidden aria-live="off">-- FPS</div>
 <button id="pb" aria-label="Pause">Pause</button>
 <div id="touch-controls" role="group" aria-label="Touch controls"><div id="move-pad" aria-label="Movement joystick"><span>MOVE</span><div id="move-knob"></div></div><button id="touch-dash" class="alt" type="button">Dash</button></div>
-<audio id="bg-music" src="MATADORA%20(Sped%20Up).mp3" loop preload="none"></audio>
+<audio id="bg-music" src="Raya(Slowed).mp3" loop preload="none"></audio>
 <section class="panel on" id="menu">
 <h1>Neon<br>Swarm</h1>
 <p>Survive 60 fixed formations. Bosses guard key waves, and wave 60 is the final fight. Collect health, tune audio, and use the mobile controls when playing on a phone.</p>
 <p>Move with WASD, arrow keys or by dragging. Dash with Space, Shift or a quick tap. P pauses and M mutes.</p>
-<p id="profile"></p><p id="save-status" role="status" aria-live="polite">Progress saves in this browser for this site address.</p><div id="skins" aria-label="Ship skins"></div>
+<p id="profile"></p><p id="account-status" role="status" aria-live="polite">Checking account sync...</p><div id="account-actions"><button class="alt" id="account-login" type="button">Sign in / create account</button><button class="alt" id="account-logout" type="button" hidden>Sign out</button></div><p id="save-status" role="status" aria-live="polite">Progress saves in this browser for this site address.</p><div id="skins" aria-label="Ship skins"></div>
 <ol class="board" id="b0"></ol>
 <button class="alt" id="records-open-menu" type="button">Pilot records</button>
 <button class="alt" id="shop-open-menu" type="button">Shop</button>
 <button class="alt" id="settings-open" type="button">Settings</button>
+<button class="alt" data-fullscreen type="button" aria-pressed="false">Fullscreen</button>
 <button class="alt" id="games-open-menu" type="button">Other games!</button>
 <button class="alt" id="admin-open-menu" type="button">Admin commands</button>
 <button id="play">Start run</button>
 </section>
-<section class="panel" id="pause"><h2>Paused</h2><button id="resume">Resume</button><button class="alt" id="records-open-pause" type="button">Pilot records</button><button class="alt" id="shop-open-pause" type="button">Shop</button><button class="alt" id="settings-pause" type="button">Settings</button><button class="alt" id="games-open-pause" type="button">Other games!</button><button class="alt" id="admin-open-pause" type="button">Admin commands</button><button class="alt" id="quit">Quit to menu</button></section>
+<section class="panel" id="pause"><h2>Paused</h2><button id="resume">Resume</button><button class="alt" id="shop-open-pause" type="button">Shop</button><button class="alt" id="settings-pause" type="button">Settings</button><button class="alt" id="games-open-pause" type="button">Other games!</button><button class="alt" id="admin-open-pause" type="button">Admin commands</button><button class="alt" id="quit">Quit to menu</button></section>
 <section class="panel" id="settings"><h2>Settings</h2><label class="setting-row"><span>Music</span><input id="music-enabled" type="checkbox"></label><label class="setting-row"><span>Music volume</span><input id="music-volume" type="range" min="0" max="100" value="35"></label><label class="setting-row"><span>Effects volume</span><input id="effects-volume" type="range" min="0" max="100" value="65"></label><label class="setting-row"><span>Frame cap <output id="fps-cap-value">60</output> FPS</span><input id="fps-cap" type="range" min="20" max="1000" step="10" value="60"></label><label class="setting-row"><span>FPS counter</span><input id="fps-visible" type="checkbox"></label><label class="setting-row"><span>Resolution quality</span><select id="resolution"><option value="240">240p - Low (no FX/music)</option><option value="340">340p - Low (no FX/music)</option><option value="480">480p</option><option value="720">720p</option><option value="1080">1080p</option><option value="1440">1440p (2K HD)</option><option value="2160">2160p (4K Ultra HD)</option><option value="4320">4320p (8K Ultra HD+)</option></select></label><p>FPS is limited by your display/browser. Resolution changes in-game rendering quality, not your monitor, and may be capped by device memory.</p><button class="alt" id="settings-close" type="button">Done</button></section>
 <section class="panel" id="records"><h2>Pilot records</h2><p id="records-summary"></p><div class="career-grid"><div class="career-stat"><span>Sorties</span><strong id="career-runs">0</strong></div><div class="career-stat"><span>Campaign wins</span><strong id="career-wins">0</strong></div><div class="career-stat"><span>Best wave</span><strong id="career-wave">0</strong></div><div class="career-stat"><span>Best score</span><strong id="career-score">0</strong></div><div class="career-stat"><span>Eliminations</span><strong id="career-kills">0</strong></div><div class="career-stat"><span>Bosses defeated</span><strong id="career-bosses">0</strong></div></div><div class="achievement-grid" id="achievement-list"></div><button class="alt" id="records-close" type="button">Back</button></section>
 <section class="panel" id="shop"><h2>Hangar shop</h2><p id="shop-balance"></p><p>Earn credits by clearing waves. Buy a ship, then equip it here or from the quick-select row.</p><div class="shop-grid" id="shop-grid"></div><button class="alt" id="shop-close" type="button">Back</button></section>
 <section class="panel" id="admin-lock"><h2>Admin Access</h2><label class="setting-row"><span>Password</span><input id="admin-password" type="password" inputmode="numeric" autocomplete="off" maxlength="16"></label><p id="admin-lock-status" role="status" aria-live="polite"></p><button id="admin-unlock" type="button">Unlock</button><button class="alt" id="admin-lock-close" type="button">Back</button></section>
 <section class="panel" id="admin"><h2>Admin Commands</h2><p>Local gameplay overrides. These controls are not secure server administration.</p><label class="setting-row"><span>Shield duration (seconds)</span><input id="admin-shield-duration" type="number" min="1" max="100" step="1" value="10"></label><button id="admin-grant-shield" type="button">Grant shield</button><label class="setting-row"><span>Fire rate <output id="admin-fire-rate-value">10</output> shots/sec</span><input id="admin-fire-rate" type="range" min="1" max="50" step="1" value="10"></label><label class="setting-row"><span>Damage per shot <output id="admin-damage-value">500</output></span><input id="admin-damage" type="number" min="1" max="10000000" step="1" value="500"></label><label class="setting-row"><span>XP multi (max 10,000x)</span><input id="admin-xp-multiplier" type="number" min="1" max="10000" step="1" value="1"></label><p id="admin-status" role="status" aria-live="polite"></p><button class="alt" id="admin-close" type="button">Done</button></section>
-<section class="panel" id="admin"><h2>Admin Commands</h2><p>Local gameplay overrides. These controls are not secure server administration.</p><label class="setting-row"><span>Shield duration (seconds)</span><input id="admin-shield-duration" type="number" min="1" max="100" step="1" value="10"></label><button id="admin-grant-shield" type="button">Grant shield</button><label class="setting-row"><span>Fire rate <output id="admin-fire-rate-value">10</output> shots/sec</span><input id="admin-fire-rate" type="range" min="1" max="50" step="1" value="10"></label><label class="setting-row"><span>Damage per shot <output id="admin-damage-value">500</output></span><input id="admin-damage" type="number" min="1" max="10000000" step="1" value="500"></label><p id="admin-status" role="status" aria-live="polite"></p><button class="alt" id="admin-close" type="button">Done</button></section>
 <section class="panel" id="games"><h2>Other games!</h2><p id="arcade-records">Best scores save in this browser.</p><div class="arcade-grid"><button class="arcade-game" data-launch-game="snake">Snake<small>Eat, grow, don't collide</small></button><button class="arcade-game" data-launch-game="tile">2048<small>Join tiles to reach 2048</small></button><button class="arcade-game" data-launch-game="memory">Memory<small>Match all eight pairs</small></button><button class="arcade-game" data-launch-game="racer">Neon Racer 3D<small>Dodge traffic on a neon highway</small></button></div><button class="alt" id="games-back" type="button">Back</button></section>
 <section class="panel" id="snake"><h2>Snake</h2><p id="snake-status" role="status" aria-live="polite"></p><div id="snake-board" class="arcade-board snake-board" aria-label="Snake game board"></div><div class="direction-pad"><button data-snake-dir="up">UP</button><button data-snake-dir="left">LEFT</button><button data-snake-dir="down">DOWN</button><button data-snake-dir="right">RIGHT</button></div><div class="arcade-actions"><button class="alt" id="snake-restart" type="button">Restart</button><button class="alt" data-games-back type="button">Other games</button></div></section>
 <section class="panel" id="game2048"><h2>2048</h2><p id="tile-status" role="status" aria-live="polite"></p><div id="tile-board" class="arcade-board tile-board" aria-label="2048 board"></div><div class="direction-pad"><button data-tile-dir="up">UP</button><button data-tile-dir="left">LEFT</button><button data-tile-dir="down">DOWN</button><button data-tile-dir="right">RIGHT</button></div><div class="arcade-actions"><button class="alt" id="tile-restart" type="button">New game</button><button class="alt" data-games-back type="button">Other games</button></div></section>
@@ -212,13 +258,23 @@ const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const cv=$('c'),ctx=cv.getContext('2d');
 let view={cw:1,ch:1,dpr:1,s:1,w:VIEW,h:VIEW},bg;
 
+const Account={state:{configured:false,authenticated:false,user:null,available:false},
+  async init(){const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),2500);try{const response=await fetch('/api/auth',{signal:controller.signal});if(response.ok){const state={...(await response.json()),available:true};if(state.authenticated&&state.user&&state.user.id){try{const previous=localStorage.getItem('neonswarm.account-id');if(previous&&previous!==state.user.id)for(const key of SavedData.keys)localStorage.removeItem(key);localStorage.setItem('neonswarm.account-id',state.user.id)}catch(e){}}this.state=state}}catch(e){}finally{clearTimeout(timeout)}this.render();return this.state},
+  render(){const status=$('account-status'),login=$('account-login'),logout=$('account-logout');if(!status||!login||!logout)return;
+    login.disabled=!this.state.available||!this.state.configured;logout.hidden=!this.state.authenticated;
+    status.textContent=!this.state.available?'Run through the Python server to enable account sync.':this.state.authenticated?'Signed in as '+this.state.user.name+'. Cloud saves are enabled.':this.state.configured?'Sign in to sync progress across devices.':'Encrypted account storage is not configured.'},
+  login(){location.assign('/auth')},
+  async logout(){const button=$('account-logout');button.disabled=true;try{const response=await fetch('/auth/logout',{method:'POST'});if(!response.ok)throw new Error('logout failed');location.reload()}catch(e){button.disabled=false;$('account-status').textContent='Could not sign out. Please retry.'}}};
+
 const SavedData={keys:['neonswarm.scores','neonswarm.profile','neonswarm.settings','neonswarm.admin','neonswarm.arcade','neonswarm.features'],id:null,timer:null,
   async init(){try{this.id=localStorage.getItem('neonswarm.save-id');if(!/^[a-f0-9]{32}$/.test(this.id||'')){this.id=crypto.randomUUID().replace(/-/g,'');localStorage.setItem('neonswarm.save-id',this.id)}}catch(e){return}
+    const account=await Account.init();
+    if(!account.available)return;
     const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),4000);
-    try{const response=await fetch('/api/saves',{headers:{'X-Save-Token':this.id},signal:controller.signal});if(!response.ok)return;const result=await response.json();for(const key of this.keys)if(localStorage.getItem(key)===null&&result.data&&result.data[key]!==undefined)localStorage.setItem(key,JSON.stringify(result.data[key]))}catch(e){}finally{clearTimeout(timeout)}},
+    try{const response=await fetch('/api/saves',{headers:{'X-Save-Token':this.id},signal:controller.signal});if(!response.ok)return;const result=await response.json();for(const key of this.keys)if(result.data&&result.data[key]!==undefined&&(account.authenticated||localStorage.getItem(key)===null))localStorage.setItem(key,JSON.stringify(result.data[key]));if(account.authenticated)this.schedule()}catch(e){}finally{clearTimeout(timeout)}},
   schedule(){if(!this.id)return;clearTimeout(this.timer);this.timer=setTimeout(()=>this.push(),1500)},
   async push(){const data={};for(const key of this.keys){try{const value=localStorage.getItem(key);if(value!==null)data[key]=JSON.parse(value)}catch(e){}}
-    try{const response=await fetch('/api/saves',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:this.id,data})});if(response.ok)$('save-status').textContent='Progress saved in this browser; repository backup is queued for this workflow leg.';else $('save-status').textContent='Progress is saved in this browser; server backup failed.'}catch(e){$('save-status').textContent='Progress is saved in this browser; server backup is unavailable.'}},
+    try{const response=await fetch('/api/saves',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:this.id,data})});if(response.ok)$('save-status').textContent=Account.state.authenticated?'Progress synced to your Neon Swarm account and saved in this browser.':'Progress saved in this browser; server backup is encrypted.';else $('save-status').textContent='Progress is saved in this browser; server backup failed.'}catch(e){$('save-status').textContent='Progress is saved in this browser; server backup is unavailable.'}},
 };
 
 /* ================= STORAGE (top 5 scores) ================= */
@@ -659,6 +715,10 @@ function frame(t){requestAnimationFrame(frame);const interval=1000/Settings.data
   fpsFrames++;if(!fpsWindow)fpsWindow=t;if(t-fpsWindow>=500){if(Settings.data.showFps)$('fps-counter').textContent=Math.round(fpsFrames*1000/(t-fpsWindow))+' FPS';fpsFrames=0;fpsWindow=t}} // browser refresh rate bounds the actual maximum
 addEventListener('resize',resize);
 $('play').onclick=()=>Game.start();$('again').onclick=()=>Game.start();$('resume').onclick=()=>Game.resume();
+$('account-login').onclick=()=>Account.login();$('account-logout').onclick=()=>Account.logout();
+function updateFullscreenButtons(){const supported=Boolean(document.fullscreenEnabled),active=Boolean(document.fullscreenElement);document.querySelectorAll('[data-fullscreen]').forEach(button=>{button.disabled=!supported;button.textContent=active?'Exit fullscreen':'Fullscreen';button.setAttribute('aria-pressed',String(active));button.title=supported?'Toggle fullscreen':'Fullscreen is unavailable in this window'})}
+document.querySelectorAll('[data-fullscreen]').forEach(button=>button.onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch(_){}});
+document.addEventListener('fullscreenchange',updateFullscreenButtons);updateFullscreenButtons();
 $('quit').onclick=()=>Game.goMenu();$('home').onclick=()=>Game.goMenu();$('pb').onclick=()=>Game.pause();
 $('records-open-menu').onclick=()=>Records.open('menu');$('records-open-pause').onclick=()=>Records.open('pause');$('records-close').onclick=()=>Records.close();
 $('settings-open').onclick=()=>Settings.open('menu');$('settings-pause').onclick=()=>Settings.open('pause');$('settings-close').onclick=()=>Settings.close();
@@ -717,30 +777,32 @@ def save_scores(rows):
 
 
 def load_saves():
+  if DATA_KEY and SAVES_DB.exists():
+    return authlib.read_encrypted_json(SAVES_DB, DATA_KEY)
+  if not os.environ.get("NEON_SWARM_SAVE_DB") and LEGACY_SAVES_DB.is_file():
     try:
-        rows = json.loads(SAVES_DB.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    if not isinstance(rows, dict):
-        raise ValueError("saved data file must contain an object")
-    return rows
+      rows = json.loads(LEGACY_SAVES_DB.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+      return {}
+    return rows if isinstance(rows, dict) else {}
+  return {}
 
 
 def save_saves(rows):
-    tmp = SAVES_DB.with_suffix(".tmp")
-    tmp.write_text(json.dumps(rows), encoding="utf-8")
-    tmp.replace(SAVES_DB)
+  authlib.write_encrypted_json(SAVES_DB, rows, DATA_KEY)
 
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "NeonSwarm/2.0"
 
-    def send_body(self, code, body, ctype="application/json"):
+    def send_body(self, code, body, ctype="application/json", extra_headers=()):
         data = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype + "; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in extra_headers:
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
 
@@ -775,36 +837,234 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(chunk)
 
+    def _secure_cookies(self):
+        forwarded = self.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip().lower()
+        hostname = urlsplit("//" + self.headers.get("Host", "")).hostname
+        return forwarded == "https" or hostname not in ("localhost", "127.0.0.1", "::1")
+
+    def _cookie(self, name, value, path="/", max_age=authlib.SESSION_SECONDS, same_site="Lax"):
+        secure = "; Secure" if self._secure_cookies() else ""
+        return (
+            name + "=" + value + "; Path=" + path
+            + "; HttpOnly; SameSite=" + same_site + "; Max-Age=" + str(max_age) + secure
+        )
+
+    def _session_token(self):
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+            return cookie["neonswarm_session"].value
+        except (KeyError, ValueError):
+            return ""
+
+    def authenticated_account(self):
+        if not ACCOUNTS:
+            return None
+        user_id = SESSIONS.get(self._session_token())
+        return ACCOUNTS.get(user_id) if user_id else None
+
+    def _send_redirect(self, location, headers=(), code=303):
+        self.send_response(code)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        for name, value in headers:
+            self.send_header(name, value)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _send_auth_page(self, renderer, *args, code=200):
+        csrf = secrets.token_urlsafe(32)
+        cookie = self._cookie("neonswarm_auth_csrf", csrf, path="/auth", max_age=1800, same_site="Strict")
+        body = renderer(csrf, *args)
+        return self.send_body(code, body, "text/html", (("Set-Cookie", cookie),))
+
+    def _auth_form(self):
+        if not self.headers.get("Content-Type", "").lower().startswith("application/x-www-form-urlencoded"):
+            raise ValueError("bad content type")
+        size = int(self.headers.get("Content-Length", 0))
+        if not 0 < size <= 8192:
+            raise ValueError("bad form size")
+        raw = self.rfile.read(size).decode("utf-8")
+        return {key: values[0] for key, values in parse_qs(raw, keep_blank_values=True).items() if values}
+
+    def _valid_auth_form(self, form):
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+            expected = cookie["neonswarm_auth_csrf"].value
+        except (KeyError, ValueError):
+            return False
+        origin = self.headers.get("Origin", "")
+        host = self.headers.get("Host", "")
+        if not origin or urlsplit(origin).netloc.casefold() != host.casefold():
+            return False
+        return secrets.compare_digest(form.get("csrf", ""), expected)
+
+    def _allow_auth_attempt(self):
+        now = time.time()
+        ip = self.client_address[0]
+        with AUTH_ATTEMPTS_LOCK:
+            attempts = [stamp for stamp in AUTH_ATTEMPTS.get(ip, []) if now - stamp < 60]
+            if len(attempts) >= 8:
+                AUTH_ATTEMPTS[ip] = attempts
+                return False
+            attempts.append(now)
+            AUTH_ATTEMPTS[ip] = attempts
+            return True
+
+    def _auth_location(self, next_path):
+        return "/auth/authorize?next=" + quote(authlib.safe_return_path(next_path), safe="/")
+
+    def _start_session(self, user, next_path):
+        token = SESSIONS.create(user["id"])
+        cookie = self._cookie("neonswarm_session", token)
+        self._send_redirect(self._auth_location(next_path), (("Set-Cookie", cookie),))
+
+    def _register(self, form):
+        if not ACCOUNTS:
+            return self.send_body(503, '{"error":"Encrypted account storage is not configured"}')
+        if not self._allow_auth_attempt():
+          return self._send_auth_page(authlib.render_register, form.get("next", "/"), "Too many attempts. Try again in a minute.", code=429)
+        try:
+            user = ACCOUNTS.register(form.get("username", ""), form.get("email", ""), form.get("password", ""))
+        except authlib.AccountError as error:
+          return self._send_auth_page(authlib.render_register, form.get("next", "/"), str(error), code=400)
+        except (OSError, RuntimeError) as error:
+            print(f"[auth] Account registration failed ({type(error).__name__}).", flush=True)
+            return self.send_body(503, '{"error":"Account storage is unavailable"}')
+        self._start_session(user, form.get("next", "/"))
+
+    def _login(self, form):
+        if not ACCOUNTS:
+            return self.send_body(503, '{"error":"Encrypted account storage is not configured"}')
+        if not self._allow_auth_attempt():
+          return self._send_auth_page(authlib.render_login, form.get("next", "/"), "Too many attempts. Try again in a minute.", code=429)
+        try:
+            user = ACCOUNTS.authenticate(form.get("email", ""), form.get("password", ""))
+        except authlib.AccountError:
+          return self._send_auth_page(authlib.render_login, form.get("next", "/"), "Email or password is incorrect.", code=401)
+        except (OSError, RuntimeError) as error:
+            print(f"[auth] Account login failed ({type(error).__name__}).", flush=True)
+            return self.send_body(503, '{"error":"Account storage is unavailable"}')
+        self._start_session(user, form.get("next", "/"))
+
+    def _authorize(self, form):
+        user = self.authenticated_account()
+        if not user:
+            return self._send_redirect("/auth/login?next=%2F")
+        if form.get("decision") == "cancel":
+            SESSIONS.revoke(self._session_token())
+            return self._send_redirect("/", (("Set-Cookie", self._cookie("neonswarm_session", "", max_age=0)),))
+        if form.get("decision") != "authorize" or not ACCOUNTS:
+            return self.send_body(400, '{"error":"Invalid authorization request"}')
+        try:
+            ACCOUNTS.authorize(user["id"])
+        except (OSError, RuntimeError) as error:
+            print(f"[auth] Consent could not be saved ({type(error).__name__}).", flush=True)
+            return self.send_body(503, '{"error":"Account storage is unavailable"}')
+        return self._send_redirect(authlib.safe_return_path(form.get("next", "/")))
+
+    def auth_status(self):
+        user = self.authenticated_account()
+        authorized = bool(user and set(authlib.PERMISSIONS).issubset(user["permissions"]))
+        body = {"configured": bool(ACCOUNTS), "authenticated": authorized}
+        if authorized:
+            body["user"] = {
+                "id": user["id"],
+                "name": user["username"],
+                "email": user["email"] if "email" in user["permissions"] else None,
+                "permissions": user["permissions"],
+            }
+        self.send_body(200, json.dumps(body))
+
+    def _logout(self):
+        if not self._same_origin():
+            return self.send_body(403, '{"error":"Invalid request origin"}')
+        SESSIONS.revoke(self._session_token())
+        self.send_response(204)
+        self.send_header("Set-Cookie", self._cookie("neonswarm_session", "", max_age=0))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def _same_origin(self):
+        origin = self.headers.get("Origin", "")
+        host = self.headers.get("Host", "")
+        return bool(origin and host and urlsplit(origin).netloc.casefold() == host.casefold())
+
     def do_GET(self):
         parsed = urlsplit(self.path)
         path = unquote(parsed.path)
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        next_path = authlib.safe_return_path(query.get("next", ["/"])[0])
+        if path == "/auth":
+            user = self.authenticated_account()
+            return self._send_redirect(self._auth_location("/") if user else "/auth/login")
+        if path == "/auth/register":
+            if not ACCOUNTS:
+                return self.send_body(503, '{"error":"Encrypted account storage is not configured"}')
+            return self._send_auth_page(authlib.render_register, next_path)
+        if path == "/auth/login":
+            if not ACCOUNTS:
+                return self.send_body(503, '{"error":"Encrypted account storage is not configured"}')
+            return self._send_auth_page(authlib.render_login, next_path)
+        if path == "/auth/authorize":
+            user = self.authenticated_account()
+            if not user:
+                return self._send_redirect("/auth/login?next=%2F")
+            return self._send_auth_page(authlib.render_authorize, user["username"], next_path)
+        if path == "/api/auth":
+            return self.auth_status()
         if path in ("/", "/index.html"):
-            self.send_body(200, GAME_HTML, "text/html")
-        elif path == "/neon_features.js":
+          return self.send_body(200, GAME_HTML, "text/html")
+        if path == "/neon_features.js":
           try:
             features = Path(__file__).resolve().with_name("neon_features.js").read_text(encoding="utf-8")
-            self.send_body(200, features, "application/javascript")
+            return self.send_body(200, features, "application/javascript")
           except OSError:
-            self.send_body(404, "// game features unavailable", "application/javascript")
-        elif path == "/api/scores":
-            self.send_body(200, json.dumps({"scores": load_scores()}))
-        elif path == "/api/saves":
+            return self.send_body(404, "// game features unavailable", "application/javascript")
+        if path == "/api/scores":
+          return self.send_body(200, json.dumps({"scores": load_scores()}))
+        if path == "/api/saves":
+          user = self.authenticated_account()
+          if user:
+            if "data" not in user["permissions"]:
+              return self.send_body(403, '{"error":"Authorize game-data access first"}')
+            save_id = "account:" + user["id"]
+          else:
             token = self.headers.get("X-Save-Token", "")
             if not re.fullmatch(r"[a-f0-9]{32}", token):
-                return self.send_body(400, '{"error":"bad save token"}')
+              return self.send_body(400, '{"error":"bad save token"}')
             save_id = hashlib.sha256(token.encode("ascii")).hexdigest()
-            self.send_body(200, json.dumps({"data": load_saves().get(save_id, {})}))
-        elif path == "/MATADORA (Sped Up).mp3":
+          try:
+            with LOCK:
+              data = load_saves().get(save_id, {})
+          except (OSError, RuntimeError, ValueError):
+            return self.send_body(500, '{"error":"save storage is unavailable"}')
+          return self.send_body(200, json.dumps({"data": data}))
+        if path == "/Raya(Slowed).mp3":
             try:
-                audio_path = Path(__file__).resolve().with_name("MATADORA (Sped Up).mp3")
-                self.send_audio(audio_path.read_bytes())
+                audio_path = Path(__file__).resolve().with_name("Raya(Slowed).mp3")
+                return self.send_audio(audio_path.read_bytes())
             except OSError:
-                self.send_body(404, '{"error":"audio not found"}')
-        else:
-            self.send_body(404, '{"error":"not found"}')
+                return self.send_body(404, '{"error":"audio not found"}')
+        return self.send_body(404, '{"error":"not found"}')
 
     def do_POST(self):
         path = urlsplit(self.path).path
+        if path == "/auth/logout":
+            return self._logout()
+        if path in ("/auth/register", "/auth/login", "/auth/authorize"):
+            try:
+                form = self._auth_form()
+            except (ValueError, UnicodeDecodeError):
+                return self.send_body(400, '{"error":"Invalid form"}')
+            if not self._valid_auth_form(form):
+                return self.send_body(403, '{"error":"Invalid request origin or form token"}')
+            if path == "/auth/register":
+                return self._register(form)
+            if path == "/auth/login":
+                return self._login(form)
+            return self._authorize(form)
         if path == "/api/saves":
             return self.save_browser_data()
         if path != "/api/scores":
@@ -835,15 +1095,24 @@ class Handler(BaseHTTPRequestHandler):
         ip, now = self.client_address[0], time.time()
         if now - LAST_SAVE_POST.get(ip, 0) < 1:
             return self.send_body(429, '{"error":"slow down"}')
+        if not DATA_KEY:
+            return self.send_body(503, '{"error":"encrypted save storage is not configured"}')
         try:
             size = int(self.headers.get("Content-Length", 0))
             if not 0 < size <= 8192:
                 raise ValueError("bad size")
             payload = json.loads(self.rfile.read(size))
-            token, data = payload["token"], payload["data"]
-            if not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{32}", token):
-                raise ValueError("bad save token")
-            save_id = hashlib.sha256(token.encode("ascii")).hexdigest()
+            data = payload["data"]
+            user = self.authenticated_account()
+            if user:
+                if "data" not in user["permissions"]:
+                    return self.send_body(403, '{"error":"Authorize game-data access first"}')
+                save_id = "account:" + user["id"]
+            else:
+                token = payload["token"]
+                if not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{32}", token):
+                    raise ValueError("bad save token")
+                save_id = hashlib.sha256(token.encode("ascii")).hexdigest()
             if not isinstance(data, dict) or not set(data).issubset(SAVE_KEYS):
                 raise ValueError("bad save data")
             if any(not isinstance(value, (dict, list)) for value in data.values()):
@@ -860,7 +1129,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_body(503, '{"error":"save capacity reached"}')
                 rows[save_id] = data
                 save_saves(rows)
-        except (OSError, ValueError):
+        except (OSError, RuntimeError, ValueError):
             return self.send_body(500, '{"error":"could not save data"}')
         self.send_body(200, '{"ok":true}')
 
@@ -878,12 +1147,15 @@ def lan_ip():
 
 
 def create_server(host, start_port):
-    for port in range(start_port, start_port + 20):
-        try:
-            return ThreadingHTTPServer((host, port), Handler), port
-        except OSError:
-            continue
-    raise SystemExit(f"No free port found. Try: python neon_swarm.py --port {start_port + 20}")
+    global ACTIVE_PORT
+    try:
+        server = ThreadingHTTPServer((host, start_port), Handler)
+    except OSError as error:
+        raise SystemExit(
+            f"Port {start_port} is unavailable. Stop the process using it or choose another with --port."
+        ) from error
+    ACTIVE_PORT = server.server_address[1]
+    return server, ACTIVE_PORT
 
 
 def run_gui(host, start_port, gui_smoke_test=False):
