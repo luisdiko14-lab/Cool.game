@@ -199,6 +199,7 @@
     pauseButton.onclick = () => openPanel('pause');
     const quitButton = document.getElementById('quit');
     quitButton?.parentNode.insertBefore(pauseButton, quitButton);
+    return panel;
   }
 
   function openPanel(from) {
