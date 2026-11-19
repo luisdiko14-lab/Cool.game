@@ -2013,5 +2013,30 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installShieldReflection() {
+    let reflectCooldown = 0;
+    const originalHurt = Game.hurt;
+    Game.hurt = function(amount) {
+      const player = this.p;
+      const shielded = !!(player && player.shield > 0 && player.inv <= 0);
+      const target = shielded ? this.enemies.filter(enemy=>!enemy.dead&&enemy.hp>0)
+        .sort((a,b)=>Math.hypot(a.x-player.x,a.y-player.y)-Math.hypot(b.x-player.x,b.y-player.y))[0] : null;
+      originalHurt.call(this, amount);
+      if (shielded && target && reflectCooldown <= 0) {
+        reflectCooldown = .3;
+        const reflected = Math.max(1, (Number(amount)||10)*.65);
+        this.damage(target, reflected);
+        FX.burst(target.x,target.y,'#3df5ff',4,95,.25,2);
+        FX.text(target.x,target.y-22,'REFLECT '+Math.ceil(reflected),'#3df5ff',12);
+      }
+    };
+    const originalUpdate = Game.update;
+    Game.update = function(dt) {
+      originalUpdate.call(this,dt);
+      reflectCooldown=Math.max(0,reflectCooldown-dt);
+    };
+  });
+
   init();
 })();
