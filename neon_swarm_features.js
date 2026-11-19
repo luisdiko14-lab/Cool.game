@@ -2230,5 +2230,40 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installWaveMutators() {
+    const rules=[
+      {name:'GLASS SWARM',score:1.35,health:.78,fire:1},
+      {name:'OVERCHARGED',score:1.25,health:1,fire:.68},
+      {name:'FORTIFIED',score:1.5,health:1.28,fire:1},
+      {name:'SUPPLY RUSH',score:1.2,health:1,fire:1}
+    ];
+    const originalSpawn=Game.spawnWave;
+    Game.spawnWave=function(){
+      originalSpawn.call(this);
+      if(this.wave%3!==0||ultimateState.lastMutatorWave===this.wave) return;
+      ultimateState.lastMutatorWave=this.wave;
+      const rule=rules[(Math.floor(this.wave/3)-1)%rules.length];
+      ultimateState.waveMutator=rule;
+      for(const enemy of this.enemies){
+        if(enemy.dead) continue;
+        if(rule.health!==1){enemy.hp=Math.max(1,Math.ceil(enemy.hp*rule.health));enemy.mhp=Math.max(enemy.hp,Math.ceil(enemy.mhp*rule.health))}
+        if(rule.fire!==1) enemy.fireT=Math.max(.12,(Number(enemy.fireT)||1)*rule.fire);
+      }
+      if(rule.name==='SUPPLY RUSH'&&this.pu){
+        const view=core.getView();
+        ['life','shield','rapid'].forEach((kind,index)=>this.pu.push({x:view.w*(.3+index*.2),y:view.h*.3,k:kind,t:24,a:0}));
+      }
+      const view=core.getView();
+      FX.ring(view.w/2,view.h*.36,240,'#b58cff');
+      FX.text(view.w/2,view.h*.36,rule.name+' · WAVE '+this.wave,'#c9a9ff',19);
+    };
+    const originalAward=Game.awardScore;
+    Game.awardScore=function(points){
+      const mult=ultimateState.waveMutator&&this.wave%3===0?ultimateState.waveMutator.score:1;
+      return originalAward.call(this,points*mult);
+    };
+  });
+
   init();
 })();
