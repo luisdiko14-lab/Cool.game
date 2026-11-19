@@ -777,7 +777,7 @@
       autopilotButton.style.display = Game.state === 'play' ? 'block' : 'none';
     }
     const originalSetForAutopilot = Game.set;
-    Game.set = function(nextState) { originalSetForAutopilot.call(this, nextState); updateAutopilotButton(); };
+    Game.set = function(nextState) { originalSetForAutopilot.call(this, nextState); updateAutopilotButton(); refreshCombatWidgets(); };
     const originalVector = Input.vec;
     Input.vec = function() {
       if (!state.autopilot || Game.state !== 'play' || !Game.p) return originalVector.call(this);
@@ -817,6 +817,14 @@
       runSamples = [];
       sampleClock = 0;
       runRecorded = false;
+      reviveUsed = false;
+      killChain = 0;
+      killChainTimer = 0;
+      lastKillAt = -Infinity;
+      novaCooldown = 0;
+      nearMissRewardClock = 0;
+      combatHudClock = 0;
+      nearMissedBullets = new WeakSet();
       originalStart.call(this);
       if (runMode === 'hardcore') {
         this.p.maxHp = 100000;
@@ -860,8 +868,10 @@
         this.p.vx *= 1.08;
         this.p.vy *= 1.08;
       }
+      const dashBefore = this.p ? this.p.dashT : 0;
       const previousLength = this.bullets.length;
       originalControl.call(this, dt);
+      if (this.p && dashBefore <= 0 && this.p.dashT > 0) dashPulse();
       const bullets = this.bullets.slice(previousLength);
       if (state.weapon === 'scatter') {
         for (const bullet of bullets) {
@@ -934,6 +944,12 @@
     const originalClearWave = Game.clearWave;
     Game.clearWave = function() {
       originalClearWave.call(this);
+      if (this.p && this.p.hp > 0 && this.p.hp < this.p.maxHp) {
+        const repair = Math.max(10, Math.ceil(this.p.maxHp * .08));
+        const restored = Math.min(repair, this.p.maxHp - this.p.hp);
+        this.p.hp += restored;
+        FX.text(this.p.x, this.p.y - 28, 'WAVE REPAIR  +' + Math.ceil(restored) + ' HP', '#6dffb0', 16);
+      }
       updateMission('waves');
       state.stats.waves++;
       checkAchievements();
