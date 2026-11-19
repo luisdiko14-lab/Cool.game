@@ -2311,5 +2311,29 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installRescueDrops() {
+    const originalStart=Game.start;
+    Game.start=function(){
+      ultimateState.rescueClock=0;
+      originalStart.call(this);
+    };
+    const originalUpdate=Game.update;
+    Game.update=function(dt){
+      originalUpdate.call(this,dt);
+      if(Game.state!=='play'||!this.p||this.p.dead) return;
+      ultimateState.rescueClock+=dt;
+      if(ultimateState.rescueClock<42) return;
+      ultimateState.rescueClock=0;
+      const p=this.p,view=core.getView();
+      const x=Math.max(30,Math.min(view.w-30,p.x+(Math.random()-.5)*160));
+      const y=Math.max(35,Math.min(view.h-35,p.y-90+(Math.random()-.5)*90));
+      this.pu.push({x,y,k:'life',t:24,a:0,featureRescue:true});
+      this.pu.push({x:Math.max(25,Math.min(view.w-25,x+42)),y,k:'shield',t:24,a:0,featureRescue:true});
+      FX.ring(x,y,125,'#6dffb0');
+      FX.text(x,y-28,'RESCUE PODS INCOMING','#6dffb0',14);
+    };
+  });
+
   init();
 })();
