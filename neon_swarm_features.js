@@ -327,7 +327,9 @@
             ? '90 seconds. Your final score is the target.'
             : state.mode === 'bullethell'
               ? 'Watch for extra incoming volleys from above.'
-              : 'Select a mode, then launch it from here or the main menu.';
+              : state.mode === 'hardcore'
+                ? '100,000 player HP. +10,000 damage on every wave. Waves 1–20: enemies have 25,000 HP. Wave 60 fires 30 orbs dealing 100 damage each every 2.4 seconds.'
+                : 'Select a mode, then launch it from here or the main menu.';
     const autopilotHost = document.getElementById('feature-autopilot');
     autopilotHost.replaceChildren();
     buttonChoice(autopilotHost, 'autopilot', state.autopilot ? 'Autopilot: ON' : 'Autopilot: OFF', 'AI steering avoids enemies and incoming shots, and collects nearby supplies. Toggle during a run too.', state.autopilot ? 'autopilot' : '', () => {
