@@ -973,8 +973,17 @@
       updateMission('kills');
       state.stats.kills++;
       if (enemy && enemy.k === 'boss') state.stats.bosses++;
+      const now = Number(this.time) || 0;
+      killChain = now - lastKillAt <= 3.2 ? killChain + 1 : 1;
+      lastKillAt = now;
+      killChainTimer = 3.2;
       checkAchievements();
       originalKill.call(this, enemy);
+      if (killChain >= 5 && killChain % 5 === 0) {
+        const bonus = 25 * Math.floor(killChain / 5);
+        const earned = this.awardScore(bonus);
+        FX.text(enemy.x, enemy.y - 30, killChain + ' KILL STREAK  +' + earned, '#ffc23d', 17);
+      }
     };
 
     const originalGem = Game.gem;
@@ -989,7 +998,23 @@
     Game.hurt = function(amount) {
       if (state.accessibility === 'calm') FX.flash = 0;
       if (runMode === 'daily' && state.mode === 'daily') amount = (amount || 5) * dailyRule(runDate).damage;
+      const player = this.p;
       originalHurt.call(this, amount);
+      if (player && player.hp <= 0 && !reviveUsed) {
+        reviveUsed = true;
+        player.hp = Math.max(1, Math.ceil(player.maxHp * .35));
+        player.dead = false;
+        player.inv = 3;
+        this.timeScale = 1;
+        this.dieT = 0;
+        this.eb.length = 0;
+        killChain = 0;
+        this.set('play');
+        FX.ring(player.x, player.y, Math.max(core.getView().w, core.getView().h) * .65, '#6dffb0');
+        FX.text(player.x, player.y - 42, 'EMERGENCY REVIVE · 35% HULL', '#6dffb0', 19);
+      } else if (player && player.hp < player.maxHp) {
+        killChain = 0;
+      }
       if (state.accessibility === 'calm') FX.flash = 0;
     };
 
@@ -1002,6 +1027,10 @@
     const originalDamage = Game.damage;
     Game.damage = function(enemy, amount) {
       if (runMode === 'hardcore') amount += 10000;
+      if (Math.random() < .12) {
+        amount *= 2.5;
+        if (enemy && Number.isFinite(enemy.x) && Number.isFinite(enemy.y)) FX.text(enemy.x, enemy.y - (enemy.r || 12) - 12, 'CRITICAL!', '#ffe36e', 15);
+      }
       if (state.weapon === 'rapid') amount *= .8;
       if (state.weapon === 'lance') amount *= 1.35;
       originalDamage.call(this, enemy, amount);
