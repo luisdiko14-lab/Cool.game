@@ -1800,5 +1800,31 @@
     renderMission();
   }
 
+
+  ultimateFeatureInstallers.push(function installOrbitingDrone() {
+    const originalUpdate = Game.update;
+    Game.update = function(dt) {
+      originalUpdate.call(this, dt);
+      if (Game.state !== 'play' || !this.p || this.p.dead) return;
+      ultimateState.droneAngle += dt * 2.35;
+      ultimateState.droneClock -= dt;
+      const p = this.p;
+      const view = core.getView();
+      const x = p.x + Math.cos(ultimateState.droneAngle) * 38;
+      const y = p.y + Math.sin(ultimateState.droneAngle) * 38;
+      if (Math.random() < .45) FX.burst(x, y, '#3df5ff', 1, 25, .22, 3);
+      if (ultimateState.droneClock <= 0) {
+        const target = this.enemies.filter(enemy => !enemy.dead && enemy.hp > 0)
+          .sort((a, b) => Math.hypot(a.x-p.x,a.y-p.y)-Math.hypot(b.x-p.x,b.y-p.y))[0];
+        if (target && Math.hypot(target.x-p.x,target.y-p.y) < Math.max(view.w,view.h)*.9) {
+          ultimateState.droneClock = .72;
+          this.damage(target, Math.max(8, 10 + this.lvl * 5));
+          FX.ring(x, y, 34, '#3df5ff');
+          FX.burst(target.x, target.y, '#3df5ff', 3, 85, .24, 2);
+        } else ultimateState.droneClock = .2;
+      }
+    };
+  });
+
   init();
 })();
