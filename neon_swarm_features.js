@@ -2147,5 +2147,32 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installRotatingBossPattern() {
+    const originalUpdate = Game.update;
+    Game.update = function(dt) {
+      originalUpdate.call(this,dt);
+      if (Game.state!=='play' || !this.p) return;
+      for (const boss of this.enemies) {
+        if (boss.dead || boss.k!=='boss') continue;
+        boss.featurePatternClock=(Number(boss.featurePatternClock)||0)+dt;
+        if (boss.featurePatternClock >= 6.2) {
+          boss.featurePatternClock=0;
+          boss.featurePatternAngle=(Number(boss.featurePatternAngle)||0)+.58;
+          for(let i=0;i<12;i++){
+            const angle=boss.featurePatternAngle+i*Math.PI*2/12;
+            this.eb.push({x:boss.x,y:boss.y,vx:Math.cos(angle)*205,vy:Math.sin(angle)*205,life:6,damage:13});
+          }
+          FX.ring(boss.x,boss.y,230,'#ff3d9a');
+          FX.text(boss.x,boss.y-(boss.r||44)-38,'ROTATING NOVA','#ff78b4',14);
+        } else if (boss.featurePatternClock >= 5.2 && !boss.featurePatternWarned) {
+          boss.featurePatternWarned=true;
+          FX.ring(boss.x,boss.y,165,'#ff3d9a');
+          FX.text(boss.x,boss.y-(boss.r||44)-24,'ROTATING NOVA CHARGING','#ff78b4',12);
+        } else if (boss.featurePatternClock < 1) boss.featurePatternWarned=false;
+      }
+    };
+  });
+
   init();
 })();
