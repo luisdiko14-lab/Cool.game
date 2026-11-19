@@ -2265,5 +2265,51 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installWaveObjectiveContracts() {
+    const originalSpawn=Game.spawnWave;
+    Game.spawnWave=function(){
+      originalSpawn.call(this);
+      const types=[
+        {type:'kills',title:'ELIMINATION CONTRACT',goal:Math.min(4,Math.max(1,this.enemies.filter(e=>!e.dead).length))},
+        {type:'gems',title:'CRYSTAL CONTRACT',goal:2},
+        {type:'speed',title:'RAPID RESPONSE',goal:0},
+        {type:'clean',title:'NO-DAMAGE PROTOCOL',goal:0}
+      ];
+      ultimateState.objective={...types[(Math.max(1,this.wave)-1)%types.length],progress:0,claimed:false,startTime:Number(this.time)||0};
+      const view=core.getView();
+      FX.text(view.w/2,view.h*.43,ultimateState.objective.title+' · BONUS REWARD','#a9d4ff',16);
+    };
+    const originalKill=Game.kill;
+    Game.kill=function(enemy){
+      originalKill.call(this,enemy);
+      const objective=ultimateState.objective;
+      if(objective&&objective.type==='kills'&&!objective.claimed) objective.progress++;
+    };
+    const originalGem=Game.gem;
+    Game.gem=function(gem){
+      originalGem.call(this,gem);
+      const objective=ultimateState.objective;
+      if(objective&&objective.type==='gems'&&!objective.claimed) objective.progress++;
+    };
+    const originalClear=Game.clearWave;
+    Game.clearWave=function(){
+      const objective=ultimateState.objective;
+      if(objective&&!objective.claimed){
+        const elapsed=(Number(this.time)||0)-objective.startTime;
+        const complete=objective.type==='kills'?objective.progress>=objective.goal:
+          objective.type==='gems'?objective.progress>=objective.goal:
+          objective.type==='speed'?elapsed<=28:!waveDamageTaken;
+        if(complete){
+          objective.claimed=true;
+          const earned=this.awardScore(220);
+          addFeatureCredits(35,'WAVE CONTRACT');
+          FX.text(core.getView().w/2,core.getView().h*.39,'CONTRACT COMPLETE +'+earned,'#a9d4ff',18);
+        } else FX.text(core.getView().w/2,core.getView().h*.39,'CONTRACT MISSED','#ff9aac',14);
+      }
+      originalClear.call(this);
+    };
+  });
+
   init();
 })();
