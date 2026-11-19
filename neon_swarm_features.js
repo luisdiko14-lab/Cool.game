@@ -1297,6 +1297,10 @@
     requestAnimationFrame(positionCoopPilot);
     window.addEventListener('keydown', event => {
       if (Game.state === 'features' && event.code === 'Escape') Game.set(state.returnTo);
+      if (Game.state === 'play' && event.code === 'KeyE' && !event.repeat) {
+        event.preventDefault();
+        activateNova();
+      }
     });
   }
 
