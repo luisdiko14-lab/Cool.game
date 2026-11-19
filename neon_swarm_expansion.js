@@ -47,12 +47,13 @@
         if(id==='hull'){p.maxHp+=30;p.hp=Math.min(p.maxHp,p.hp+30);}
         if(id==='shield')p.shield=Math.max(p.shield,5);
         text(p.x,p.y-38,name.toUpperCase(),'#ffc23d',15);
-        S.draftEl.style.display='none';
+        S.draftEl.style.display='none';Game.resume();
       });
       host.append(b);
     });
-    const close=document.createElement('button');close.type='button';close.className='nsx-sub';close.textContent='Continue without upgrade';close.onclick=()=>{S.draftEl.style.display='none';};host.append(close);
+    const close=document.createElement('button');close.type='button';close.className='nsx-sub';close.textContent='Continue without upgrade';close.onclick=()=>{S.draftEl.style.display='none';Game.resume();};host.append(close);
     S.draftEl.style.display='flex';
+    if(Game.state==='play')Game.pause();
   }
   function tagWave(){
     const enemies=Game.enemies.filter(e=>!e.dead&&e.k!=='boss');
