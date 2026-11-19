@@ -25,6 +25,20 @@
     { title: 'Supply Blackout', detail: 'Fewer safe moments. Incoming damage is increased.', damage: 1.25, health: 1.15 }
   ];
   const BOSS_WAVES = [5, 10, 30, 50, 60];
+  const ACHIEVEMENTS = [
+    { id: 'first-blood', title: 'First Blood', description: 'Defeat your first enemy.', stat: 'kills', goal: 1, reward: 100 },
+    { id: 'swarm-breaker', title: 'Swarm Breaker', description: 'Defeat 100 enemies across all runs.', stat: 'kills', goal: 100, reward: 250 },
+    { id: 'crystal-collector', title: 'Crystal Collector', description: 'Collect 50 gems.', stat: 'gems', goal: 50, reward: 300 },
+    { id: 'wave-runner', title: 'Wave Runner', description: 'Clear 10 waves.', stat: 'waves', goal: 10, reward: 500 },
+    { id: 'boss-hunter', title: 'Boss Hunter', description: 'Defeat five bosses.', stat: 'bosses', goal: 5, reward: 1000 },
+    { id: 'score-machine', title: 'Score Machine', description: 'Earn 25,000 score across all runs.', stat: 'totalScore', goal: 25000, reward: 500 },
+    { id: 'veteran-pilot', title: 'Veteran Pilot', description: 'Complete 10 runs.', stat: 'runs', goal: 10, reward: 350 }
+  ];
+  const STAT_LABELS = [
+    ['runs', 'Runs completed'], ['kills', 'Enemies defeated'], ['gems', 'Gems collected'],
+    ['waves', 'Waves cleared'], ['bosses', 'Bosses defeated'], ['totalScore', 'Lifetime score'],
+    ['bestScore', 'Personal best score'], ['bestWave', 'Best wave reached']
+  ];
 
   function utcDate() {
     return new Date().toISOString().slice(0, 10);
@@ -86,6 +100,11 @@
   }
 
   let state = loadState();
+  state.stats = normalizeStats(state.stats);
+  state.achievements = Array.isArray(state.achievements)
+    ? [...new Set(state.achievements.filter(id => ACHIEVEMENTS.some(item => item.id === id)))]
+    : [];
+  let runRecorded = false;
   let runMode = state.mode;
   let runDate = utcDate();
   const nativeRandom = Math.random;
@@ -121,6 +140,19 @@
       .feature-meter{width:min(520px,90vw);height:8px;background:#1a2340;border-radius:8px;overflow:hidden}
       .feature-meter i{display:block;height:100%;background:var(--cyan)}
       #feature-replay{width:min(620px,92vw);height:200px;background:#080c17;border:1px solid rgba(61,245,255,.4);border-radius:8px}
+      .feature-stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:min(620px,94vw)}
+      .feature-stat{padding:10px;border:1px solid rgba(61,245,255,.2);border-radius:8px;background:rgba(17,8,43,.72);text-align:left}
+      .feature-stat span,.feature-stat strong{display:block}
+      .feature-stat span{color:var(--dim);font-size:10px}
+      .feature-stat strong{color:var(--cyan);font-size:18px;margin-top:3px}
+      .feature-achievement-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:min(620px,94vw)}
+      .feature-achievement{padding:10px;border:1px solid rgba(61,245,255,.2);border-radius:8px;background:rgba(17,8,43,.72);text-align:left}
+      .feature-achievement.unlocked{border-color:rgba(255,215,90,.7);box-shadow:inset 0 0 12px rgba(255,215,90,.08)}
+      .feature-achievement strong,.feature-achievement small,.feature-achievement span{display:block}
+      .feature-achievement small{color:var(--dim);font-size:10px;margin:4px 0 8px}
+      .feature-achievement span{font-size:10px;color:var(--gold)}
+      .feature-achievement-meter{height:5px;background:#1a2340;border-radius:6px;overflow:hidden;margin-top:7px}
+      .feature-achievement-meter i{display:block;height:100%;background:var(--cyan)}
       .feature-pilot{position:fixed;z-index:6;width:24px;height:30px;display:none;background:#79ffad;clip-path:polygon(50% 0,100% 100%,50% 78%,0 100%);filter:drop-shadow(0 0 9px #79ffad);pointer-events:none;transform:translate(-50%,-50%)}
       body.access-contrast{--ink:#fff;--dim:#e3efff;--cyan:#00ffff;--pink:#ff4d00;}
       body.access-contrast canvas{filter:contrast(1.28) saturate(1.18)}
@@ -145,6 +177,7 @@
         <button type="button" data-feature-tab="mission">Mission board</button>
         <button type="button" data-feature-tab="replay">Flight recorder</button>
         <button type="button" data-feature-tab="access">Accessibility</button>
+        <button type="button" data-feature-tab="records">Records &amp; achievements</button>
       </div>
       <div class="feature-content" data-feature-view="modes">
         <p id="feature-daily" class="feature-note"></p>
@@ -173,6 +206,13 @@
       <div class="feature-content" data-feature-view="access" hidden>
         <p class="feature-note">Reduce visual intensity or enlarge key interface elements.</p>
         <div class="feature-row" id="feature-accessibility"></div>
+      </div>
+      <div class="feature-content" data-feature-view="records" hidden>
+        <p id="feature-achievement-summary" class="feature-note"></p>
+        <div id="feature-stat-grid" class="feature-stat-grid"></div>
+        <h3>Achievement collection</h3>
+        <div id="feature-achievement-list" class="feature-achievement-list"></div>
+        <p class="feature-note">Credits are awarded automatically the first time each achievement unlocks.</p>
       </div>
       <button id="feature-close" class="alt" type="button">Back</button>
     `;
@@ -219,6 +259,7 @@
       button.setAttribute('aria-selected', String(selected));
     });
     if (tab === 'replay') drawReplay(false);
+    if (tab === 'records') renderRecords();
   }
 
   function buttonChoice(host, key, label, detail, selected, choose) {
@@ -327,6 +368,7 @@
       : 'No recorded sortie yet. Finish a run to record its flight path.';
     document.getElementById('feature-replay-play').disabled = !replay || replay.samples.length < 2;
     if (document.querySelector('[data-feature-view="replay"]:not([hidden])')) drawReplay(false);
+    renderRecords();
   }
 
   function applyAccessibility() {
@@ -379,8 +421,9 @@
   }
 
   function saveReplay() {
-    if (!runSamples.length && Game.p && view.w && view.h) {
-      runSamples.push([Math.round(Game.p.x / view.w * 255), Math.round(Game.p.y / view.h * 255), -1, -1]);
+    if (!runSamples.length && Game.p) {
+      const view = core.getView();
+      if (view.w && view.h) runSamples.push([Math.round(Game.p.x / view.w * 255), Math.round(Game.p.y / view.h * 255), -1, -1]);
     }
     state.lastReplay = {
       mode: runMode,
@@ -473,7 +516,6 @@
       if (!gem.dead && Math.hypot(gem.x - pilot.x, gem.y - pilot.y) < 18) {
         gem.dead = true;
         Game.gem(gem);
-        updateMission('gems');
       }
     }
   }
@@ -502,6 +544,7 @@
       this.bossRushIndex = 0;
       runSamples = [];
       sampleClock = 0;
+      runRecorded = false;
       originalStart.call(this);
       if (runMode === 'coop') {
         const view = core.getView();
@@ -583,6 +626,8 @@
     Game.clearWave = function() {
       originalClearWave.call(this);
       updateMission('waves');
+      state.stats.waves++;
+      checkAchievements();
       if (runMode === 'boss' && state.mode === 'boss') this.bossRushIndex++;
     };
 
@@ -601,12 +646,17 @@
     const originalKill = Game.kill;
     Game.kill = function(enemy) {
       updateMission('kills');
+      state.stats.kills++;
+      if (enemy && enemy.k === 'boss') state.stats.bosses++;
+      checkAchievements();
       originalKill.call(this, enemy);
     };
 
     const originalGem = Game.gem;
     Game.gem = function(gem) {
       updateMission('gems');
+      state.stats.gems++;
+      checkAchievements();
       originalGem.call(this, gem);
     };
 
@@ -638,6 +688,17 @@
 
     const originalOver = Game.over;
     Game.over = function() {
+      if (!runRecorded) {
+        runRecorded = true;
+        const finalScore = Math.max(0, Number(this.score) || 0);
+        const finalWave = Math.max(1, Number(this.wave) || 1);
+        state.stats.runs++;
+        state.stats.totalScore = Math.min(Number.MAX_SAFE_INTEGER, state.stats.totalScore + finalScore);
+        state.stats.bestScore = Math.max(state.stats.bestScore, finalScore);
+        state.stats.bestWave = Math.max(state.stats.bestWave, finalWave);
+        checkAchievements();
+        saveState();
+      }
       saveReplay();
       if (runMode === 'endless') {
         state.endlessBest = Math.max(state.endlessBest, this.wave || 1);
@@ -692,6 +753,78 @@
         }
       }
     };
+  }
+
+  function normalizeStats(source) {
+    const stats = {};
+    for (const key of ['runs', 'kills', 'gems', 'waves', 'bosses', 'totalScore', 'bestScore', 'bestWave']) {
+      const value = Number(source && source[key]);
+      stats[key] = Number.isSafeInteger(value) && value > 0 ? value : 0;
+    }
+    return stats;
+  }
+
+  function checkAchievements() {
+    const unlocked = [];
+    for (const item of ACHIEVEMENTS) {
+      const progress = Number(state.stats[item.stat]) || 0;
+      if (progress >= item.goal && !state.achievements.includes(item.id)) {
+        state.achievements.push(item.id);
+        unlocked.push(item);
+      }
+    }
+    if (!unlocked.length) return;
+    if (Profile.data && typeof Profile.data === 'object') {
+      const reward = unlocked.reduce((sum, item) => sum + item.reward, 0);
+      Profile.data.credits = Math.max(0, Number(Profile.data.credits) || 0) + reward;
+      if (typeof Profile.save === 'function') Profile.save();
+      if (typeof Profile.render === 'function') Profile.render();
+    }
+    const view = core.getView();
+    for (const item of unlocked) {
+      FX.text(view.w / 2, 92, 'ACHIEVEMENT: ' + item.title + '  +' + item.reward + ' CR', '#ffd75a', 20);
+    }
+    saveState();
+    renderRecords();
+  }
+
+  function renderRecords() {
+    const statHost = document.getElementById('feature-stat-grid');
+    const achievementHost = document.getElementById('feature-achievement-list');
+    const summary = document.getElementById('feature-achievement-summary');
+    if (!statHost || !achievementHost || !summary) return;
+    statHost.replaceChildren();
+    for (const [key, label] of STAT_LABELS) {
+      const card = document.createElement('div');
+      card.className = 'feature-stat';
+      const name = document.createElement('span');
+      name.textContent = label;
+      const value = document.createElement('strong');
+      value.textContent = Number(state.stats[key] || 0).toLocaleString();
+      card.append(name, value);
+      statHost.append(card);
+    }
+    achievementHost.replaceChildren();
+    for (const item of ACHIEVEMENTS) {
+      const progress = Math.min(item.goal, Number(state.stats[item.stat]) || 0);
+      const unlocked = state.achievements.includes(item.id);
+      const card = document.createElement('article');
+      card.className = 'feature-achievement' + (unlocked ? ' unlocked' : '');
+      const title = document.createElement('strong');
+      title.textContent = (unlocked ? '★ ' : '◇ ') + item.title;
+      const detail = document.createElement('small');
+      detail.textContent = item.description;
+      const status = document.createElement('span');
+      status.textContent = unlocked ? 'UNLOCKED · +' + item.reward + ' CREDITS' : progress.toLocaleString() + ' / ' + item.goal.toLocaleString() + ' · ' + item.reward + ' credits';
+      const meter = document.createElement('div');
+      meter.className = 'feature-achievement-meter';
+      const fill = document.createElement('i');
+      fill.style.width = Math.min(100, progress / item.goal * 100) + '%';
+      meter.append(fill);
+      card.append(title, detail, status, meter);
+      achievementHost.append(card);
+    }
+    summary.textContent = state.achievements.length + ' / ' + ACHIEVEMENTS.length + ' achievements unlocked · Lifetime pilot records';
   }
 
   function init() {
