@@ -738,7 +738,7 @@
     nova.id = 'feature-nova-button';
     nova.type = 'button';
     nova.textContent = '✦ NOVA [E]';
-    nova.title = 'Clear enemy bullets and damage every enemy. Cooldown: 25 seconds.';
+    nova.title = 'Clear enemy bullets and damage every enemy. Standard cooldown: 25 seconds; unlocked Admin cooldown: 1 second.';
     nova.addEventListener('click', activateNova);
     document.body.append(nova);
     combatWidgets = { hud, wave, enemies, hp, score, streak, threat, warning, boss, bossValue, bossFill, nova };
@@ -746,9 +746,10 @@
 
   function activateNova() {
     if (Game.state !== 'play' || !Game.p || novaCooldown > 0) return;
+    const adminAccessed = typeof Admin !== 'undefined' && Admin.unlocked === true;
     Game.blast(12, '#ffc23d');
-    novaCooldown = 25;
-    FX.text(Game.p.x, Game.p.y - 38, 'NOVA BURST!', '#ffc23d', 22);
+    novaCooldown = adminAccessed ? 1 : 25;
+    FX.text(Game.p.x, Game.p.y - 38, adminAccessed ? 'ADMIN NOVA · 1s COOLDOWN' : 'NOVA BURST!', '#ffc23d', 22);
     refreshCombatWidgets();
   }
 
