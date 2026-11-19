@@ -9,7 +9,7 @@
   const MODE_NAMES = {
     campaign: 'Campaign', daily: 'Daily challenge', endless: 'Endless survival',
     boss: 'Boss rush', coop: 'Local co-op', timeattack: 'Time attack',
-    bullethell: 'Bullet hell', survival: 'Veteran survival'
+    bullethell: 'Bullet hell', survival: 'Veteran survival', hardcore: 'Hardcore'
   };
   const WEAPONS = {
     standard: 'Standard', scatter: 'Scatter', rapid: 'Rapid pulse', lance: 'Lance'
@@ -290,7 +290,8 @@
       ['coop', 'Local co-op', 'Arrow keys pilot a second support ship.'],
       ['timeattack', 'Time attack', 'Score as much as possible before 90 seconds run out.'],
       ['bullethell', 'Bullet hell', 'Dodge extra incoming projectile volleys.'],
-      ['survival', 'Veteran survival', 'Start at wave 10 and fight endless escalating waves.']
+      ['survival', 'Veteran survival', 'Start at wave 10 and fight endless escalating waves.'],
+      ['hardcore', 'Hardcore', 'Waves 1–20: 25,000 HP enemies. +10,000 damage on every wave. 100,000 player HP and a 30-orb final-wave barrage.']
     ];
     const modeHost = document.getElementById('feature-modes');
     modeHost.replaceChildren();
@@ -607,6 +608,11 @@
       sampleClock = 0;
       runRecorded = false;
       originalStart.call(this);
+      if (runMode === 'hardcore') {
+        this.p.maxHp = 100000;
+        this.p.hp = 100000;
+        FX.text(core.getView().w / 2, core.getView().h * .3, 'HARDCORE · 100,000 HP', '#ff3d5f', 24);
+      }
       if (runMode === 'survival') {
         this.wave = 10;
         this.enemies.length = 0;
@@ -615,6 +621,7 @@
       }
       this.modeClock = 0;
       this.extraVolleyClock = 0;
+      this.hardcoreFinalVolleyClock = 0;
       if (runMode === 'coop') {
         const view = core.getView();
         this.pilot2 = { x: view.w * .25, y: view.h * .82, cooldown: .1 };
@@ -674,6 +681,7 @@
       if ((runMode === 'endless' || runMode === 'survival') && this.wave > MAX_WAVE && Number.isFinite(health)) {
         health = Math.ceil(health * (1 + (this.wave - MAX_WAVE) * .06));
       }
+      if (runMode === 'hardcore' && this.wave <= 20) health = 25000;
       return originalAdd.call(this, kind, x, y, health);
     };
 
@@ -745,6 +753,7 @@
 
     const originalDamage = Game.damage;
     Game.damage = function(enemy, amount) {
+      if (runMode === 'hardcore') amount += 10000;
       if (state.weapon === 'rapid') amount *= .8;
       if (state.weapon === 'lance') amount *= 1.35;
       originalDamage.call(this, enemy, amount);
@@ -800,6 +809,20 @@
           FX.text(core.getView().w / 2, 42, 'TIME ATTACK · ' + remaining.toFixed(1) + 's', '#ffc23d', 16);
         }
         if (remaining <= 0) { this.over(); return; }
+      }
+      if (Game.state === 'play' && runMode === 'hardcore' && this.wave >= MAX_WAVE) {
+        this.hardcoreFinalVolleyClock = (this.hardcoreFinalVolleyClock || 0) + dt;
+        if (this.hardcoreFinalVolleyClock >= 2.4) {
+          this.hardcoreFinalVolleyClock = 0;
+          const p = this.p, view = core.getView();
+          const originX = view.w / 2, originY = view.h * .12;
+          const aim = Math.atan2(p.y - originY, p.x - originX);
+          for (let i = 0; i < 30; i++) {
+            const angle = aim + (i - 14.5) * .035;
+            this.eb.push({x:originX,y:originY,vx:Math.cos(angle)*285,vy:Math.sin(angle)*285,life:7,damage:100});
+          }
+          FX.text(view.w / 2, view.h * .22, 'FINAL WAVE · 30 INCOMING ORBS · 100 DAMAGE EACH', '#ff3d5f', 15);
+        }
       }
       if (Game.state === 'play' && runMode === 'bullethell') {
         this.extraVolleyClock = (this.extraVolleyClock || 0) + dt;
