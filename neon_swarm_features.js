@@ -1967,5 +1967,29 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installPiercingVolley() {
+    const originalControl = Game.control;
+    Game.control = function(dt) {
+      const before = this.bullets.length;
+      originalControl.call(this, dt);
+      if (this.bullets.length <= before || !this.p) return;
+      ultimateState.piercingVolley++;
+      if (ultimateState.piercingVolley % 8 !== 0) return;
+      const p = this.p, dx = Math.cos(p.aim), dy = Math.sin(p.aim);
+      const linedUp = this.enemies.map(enemy => {
+        const ex = enemy.x-p.x, ey = enemy.y-p.y;
+        return { enemy, along: ex*dx+ey*dy, across: Math.abs(ex*dy-ey*dx) };
+      }).filter(item => !item.enemy.dead && item.along > 25 && item.along < 900 && item.across < (item.enemy.r || 12) + 13)
+        .sort((a,b)=>a.along-b.along).slice(0,3);
+      if (!linedUp.length) return;
+      FX.text(p.x + dx*45, p.y + dy*45, 'PIERCING VOLLEY', '#70e9ff', 13);
+      for (const item of linedUp) {
+        this.damage(item.enemy, Math.max(10, 14 + this.lvl * 8));
+        FX.ring(item.enemy.x, item.enemy.y, 34, '#70e9ff');
+      }
+    };
+  });
+
   init();
 })();
