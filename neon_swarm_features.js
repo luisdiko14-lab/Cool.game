@@ -2381,5 +2381,28 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installVictoryStreakRewards() {
+    const originalStart=Game.start;
+    Game.start=function(){
+      ultimateState.cleanStreak=0;
+      originalStart.call(this);
+    };
+    const originalClear=Game.clearWave;
+    Game.clearWave=function(){
+      const flawless=!waveDamageTaken;
+      originalClear.call(this);
+      if(flawless) ultimateState.cleanStreak++;
+      else ultimateState.cleanStreak=0;
+      if(ultimateState.cleanStreak>=5){
+        ultimateState.cleanStreak=0;
+        const reward=this.awardScore(500);
+        addFeatureCredits(80,'FIVE-WAVE VICTORY STREAK');
+        if(this.p&&this.p.hp>0) this.p.hp=Math.min(this.p.maxHp,this.p.hp+Math.ceil(this.p.maxHp*.06));
+        FX.text(core.getView().w/2,core.getView().h*.36,'5-WAVE STREAK · +'+reward+' · REPAIR','#ffc23d',19);
+      }
+    };
+  });
+
   init();
 })();
