@@ -2038,5 +2038,19 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installArmorBreak() {
+    const originalDamage = Game.damage;
+    Game.damage = function(enemy, amount) {
+      if (enemy && !enemy.dead) {
+        enemy.featureArmorStacks = Math.min(6, (Number(enemy.featureArmorStacks)||0)+1);
+        const stacks = enemy.featureArmorStacks;
+        if (stacks >= 2) amount *= 1 + (stacks-1)*.035;
+        if (stacks === 4) FX.text(enemy.x,enemy.y-(enemy.r||12)-20,'ARMOR BREAK','#ffc23d',12);
+      }
+      originalDamage.call(this,enemy,amount);
+    };
+  });
+
   init();
 })();
