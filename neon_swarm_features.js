@@ -2357,5 +2357,29 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installEndlessEscalation() {
+    if(typeof ultimateState.endlessClock!=='number') ultimateState.endlessClock=0;
+    const originalUpdate=Game.update;
+    Game.update=function(dt){
+      originalUpdate.call(this,dt);
+      if(Game.state!=='play'||!this.p||this.wave<=MAX_WAVE) return;
+      ultimateState.endlessClock+=dt;
+      const interval=Math.max(3.2,7.5-(this.wave-MAX_WAVE)*.14);
+      if(ultimateState.endlessClock<interval) return;
+      ultimateState.endlessClock=0;
+      const view=core.getView(),origin=this.enemies.find(e=>!e.dead&&e.k==='boss')||this.enemies.find(e=>!e.dead);
+      const x=origin?origin.x:view.w*.5,y=origin?origin.y:view.h*.25;
+      const count=Math.min(18,9+Math.floor((this.wave-MAX_WAVE)/3));
+      const rotation=(Number(this.time)||0)*.31;
+      for(let i=0;i<count;i++){
+        const angle=rotation+i*Math.PI*2/count;
+        this.eb.push({x,y,vx:Math.cos(angle)*Math.min(330,210+(this.wave-MAX_WAVE)*2),vy:Math.sin(angle)*Math.min(330,210+(this.wave-MAX_WAVE)*2),life:6,damage:Math.min(35,12+Math.floor((this.wave-MAX_WAVE)/4))});
+      }
+      FX.ring(x,y,220,'#ff4fd8');
+      FX.text(view.w*.5,view.h*.42,'ENDLESS FRACTURE · WAVE '+this.wave,'#ff79dd',16);
+    };
+  });
+
   init();
 })();
