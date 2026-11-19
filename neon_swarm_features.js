@@ -141,6 +141,21 @@
   let bonusGemCount = 0;
   const featureClamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const clamp = featureClamp;
+  let featurePackWidgets = null;
+  const packCooldowns = { overdrive: 22, emp: 25, shield: 30, repair: 35, blink: 14 };
+  let packTimers = { overdrive: 0, emp: 0, shield: 0, repair: 0, blink: 0 };
+  let waveStartedAt = 0;
+  let waveDamageTaken = false;
+  let cleanWaveStreak = 0;
+  let runKills = 0;
+  let runGems = 0;
+  let gemStreak = 0;
+  let gemStreakTimer = 0;
+  let survivalClock = 0;
+  let lowHullRegenClock = 0;
+  let abilityHudClock = 0;
+  let lastBossAlertAt = -Infinity;
+  let bossFinalPhase = new WeakSet();
 
   function saveState() {
     try {
@@ -202,6 +217,13 @@
       #feature-boss-health-fill{height:100%;width:100%;background:linear-gradient(90deg,#ff3d9a,#ff6b55);box-shadow:0 0 12px #ff3d9a;transition:width .12s}
       #feature-nova-button{position:fixed;z-index:31;right:14px;bottom:calc(env(safe-area-inset-bottom,0px) + 76px);display:none;padding:11px 15px;border:1px solid rgba(255,194,61,.7);border-radius:10px;background:rgba(48,29,8,.92);color:#ffe4a0;font-weight:900;box-shadow:0 0 18px rgba(255,194,61,.18)}
       #feature-nova-button:disabled{opacity:.65}
+      #feature-ability-dock{position:fixed;z-index:29;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 132px);display:none;width:min(210px,48vw);padding:7px;border:1px solid rgba(61,245,255,.3);border-radius:10px;background:rgba(7,10,28,.84);backdrop-filter:blur(8px);pointer-events:auto}
+      #feature-ability-status{padding:2px 4px 6px;color:#b9d9f5;font:700 9px/1.4 ui-monospace,monospace;text-align:center}
+      #feature-ability-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
+      #feature-ability-buttons button{min-width:0;padding:7px 3px;border:1px solid rgba(61,245,255,.38);border-radius:6px;background:rgba(17,8,43,.94);color:#e9f8ff;font:800 9px/1.2 ui-monospace,monospace}
+      #feature-ability-buttons button:disabled{opacity:.48}
+      #feature-ability-buttons button span{display:block;margin-top:3px;color:#8ea7c9;font-size:8px}
+      @media(max-width:720px){#feature-ability-dock{right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 126px);width:min(192px,54vw)}#feature-ability-buttons{gap:4px}}
       @media(max-width:720px){.feature-tabs{max-width:94vw}.feature-content{max-height:58vh}.feature-choice{min-width:130px}}
     `;
     document.head.append(style);
@@ -780,8 +802,142 @@
     if (cleared || hit) FX.text(p.x, p.y - 30, 'DASH PULSE · ' + cleared + ' SHOTS / ' + hit + ' HITS', '#3df5ff', 13);
   }
 
+
+  function addFeatureCredits(amount, label) {
+    if (!Profile.data || !Number.isFinite(Number(Profile.data.credits))) return;
+    Profile.data.credits = Math.max(0, Number(Profile.data.credits) + amount);
+    if (typeof Profile.save === 'function') Profile.save();
+    if (typeof Profile.render === 'function') Profile.render();
+    if (Game.p && label) FX.text(Game.p.x, Game.p.y - 52, label + '  +' + amount + ' CR', '#ffd75a', 14);
+  }
+
+  function createFeatureAbilityDock() {
+    const dock = document.createElement('section');
+    dock.id = 'feature-ability-dock';
+    const status = document.createElement('div');
+    status.id = 'feature-ability-status';
+    status.textContent = 'TACTICAL SYSTEMS · Q / R / F / C / X';
+    const buttons = document.createElement('div');
+    buttons.id = 'feature-ability-buttons';
+    const definitions = [
+      ['overdrive', 'BOOST', 'Q', useOverdrive],
+      ['emp', 'EMP', 'R', useEmp],
+      ['shield', 'GUARD', 'F', useShieldBurst],
+      ['repair', 'REPAIR', 'C', useRepairKit],
+      ['blink', 'BLINK', 'X', useBlink]
+    ];
+    const refs = {};
+    for (const [key, label, hotkey, action] of definitions) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.innerHTML = label + '<span>' + hotkey + '</span>';
+      button.title = label + ' ability · ' + hotkey;
+      button.addEventListener('click', action);
+      buttons.append(button);
+      refs[key] = button;
+    }
+    dock.append(status, buttons);
+    document.body.append(dock);
+    featurePackWidgets = { dock, status, buttons: refs };
+  }
+
+  function updateFeatureAbilityDock() {
+    if (!featurePackWidgets) return;
+    const active = Game.state === 'play' && !!Game.p && !Game.p.dead;
+    featurePackWidgets.dock.style.display = active ? 'block' : 'none';
+    if (!active) return;
+    for (const [key, button] of Object.entries(featurePackWidgets.buttons)) {
+      const left = Math.max(0, packTimers[key] || 0);
+      button.disabled = left > 0;
+      const labels = { overdrive: 'BOOST', emp: 'EMP', shield: 'GUARD', repair: 'REPAIR', blink: 'BLINK' };
+      const hotkeys = { overdrive: 'Q', emp: 'R', shield: 'F', repair: 'C', blink: 'X' };
+      button.innerHTML = labels[key] + '<span>' + (left > 0 ? left.toFixed(1) + 's' : hotkeys[key] + ' READY') + '</span>';
+    }
+    const elapsed = Math.max(0, (Number(Game.time) || 0) - waveStartedAt);
+    featurePackWidgets.status.textContent = 'WAVE ' + elapsed.toFixed(1) + 's · CLEAN ' + cleanWaveStreak + ' · GEMS ' + gemStreak;
+  }
+
+  function useOverdrive() {
+    if (Game.state !== 'play' || !Game.p || packTimers.overdrive > 0) return;
+    packTimers.overdrive = packCooldowns.overdrive;
+    Game.p.rapid = Math.max(Game.p.rapid, 8);
+    FX.ring(Game.p.x, Game.p.y, 150, '#ffc23d');
+    FX.text(Game.p.x, Game.p.y - 42, 'WEAPON OVERDRIVE · 8s', '#ffc23d', 17);
+    updateFeatureAbilityDock();
+  }
+
+  function useEmp() {
+    if (Game.state !== 'play' || !Game.p || packTimers.emp > 0) return;
+    packTimers.emp = packCooldowns.emp;
+    let cleared = 0;
+    for (const bullet of Game.eb) if (bullet.life > 0) { bullet.life = 0; cleared++; }
+    let struck = 0;
+    for (const enemy of [...Game.enemies]) {
+      if (!enemy.dead) { Game.damage(enemy, 18); struck++; }
+    }
+    FX.ring(Game.p.x, Game.p.y, Math.max(core.getView().w, core.getView().h) * .72, '#b66bff');
+    FX.text(Game.p.x, Game.p.y - 42, 'EMP · ' + cleared + ' PROJECTILES / ' + struck + ' HOSTILES', '#c99bff', 15);
+    updateFeatureAbilityDock();
+  }
+
+  function useShieldBurst() {
+    if (Game.state !== 'play' || !Game.p || packTimers.shield > 0) return;
+    packTimers.shield = packCooldowns.shield;
+    Game.p.shield = Math.max(Game.p.shield, 7);
+    FX.ring(Game.p.x, Game.p.y, 125, '#3df5ff');
+    FX.text(Game.p.x, Game.p.y - 42, 'GUARDIAN SHIELD · 7s', '#3df5ff', 17);
+    updateFeatureAbilityDock();
+  }
+
+  function useRepairKit() {
+    if (Game.state !== 'play' || !Game.p || packTimers.repair > 0 || Game.p.hp >= Game.p.maxHp) return;
+    packTimers.repair = packCooldowns.repair;
+    const restored = Math.min(Game.p.maxHp - Game.p.hp, Math.max(1, Math.ceil(Game.p.maxHp * .18)));
+    Game.p.hp += restored;
+    FX.burst(Game.p.x, Game.p.y, '#6dffb0', 18, 180, .5, 3);
+    FX.text(Game.p.x, Game.p.y - 42, 'FIELD REPAIR  +' + restored, '#6dffb0', 17);
+    updateFeatureAbilityDock();
+  }
+
+  function useBlink() {
+    if (Game.state !== 'play' || !Game.p || packTimers.blink > 0) return;
+    const p = Game.p, view = core.getView();
+    let threat = null, distance = Infinity;
+    for (const item of [...Game.enemies, ...Game.eb]) {
+      if (!item || item.dead || item.life === 0) continue;
+      const d = Math.hypot(item.x - p.x, item.y - p.y);
+      if (d < distance) { distance = d; threat = item; }
+    }
+    let dx = threat ? p.x - threat.x : 0;
+    let dy = threat ? p.y - threat.y : -1;
+    const length = Math.hypot(dx, dy) || 1;
+    dx /= length; dy /= length;
+    p.x = featureClamp(p.x + dx * 145, p.r, view.w - p.r);
+    p.y = featureClamp(p.y + dy * 145, p.r, view.h - p.r);
+    p.inv = Math.max(p.inv, 1.25);
+    packTimers.blink = packCooldowns.blink;
+    FX.ring(p.x, p.y, 105, '#b66bff');
+    FX.text(p.x, p.y - 42, 'PHASE BLINK', '#c99bff', 17);
+    updateFeatureAbilityDock();
+  }
+
+  function useTacticalScan() {
+    if (Game.state !== 'play' || !Game.p) return;
+    const p = Game.p;
+    const threats = Game.enemies.filter(enemy => !enemy.dead)
+      .map(enemy => ({ enemy, distance: Math.hypot(enemy.x - p.x, enemy.y - p.y) }))
+      .sort((a, b) => a.distance - b.distance).slice(0, 3);
+    FX.ring(p.x, p.y, Math.min(core.getView().w, core.getView().h) * .58, '#3df5ff');
+    for (const item of threats) {
+      FX.ring(item.enemy.x, item.enemy.y, 34, '#ff718c');
+      FX.text(item.enemy.x, item.enemy.y - (item.enemy.r || 12) - 18, Math.round(item.distance) + 'm', '#3df5ff', 12);
+    }
+    FX.text(p.x, p.y + 42, 'TACTICAL SCAN · ' + threats.length + ' TARGETS', '#3df5ff', 13);
+  }
+
   function installHooks() {
     createCombatWidgets();
+    createFeatureAbilityDock();
     const autopilotButton = document.createElement('button');
     autopilotButton.type = 'button';
     autopilotButton.id = 'feature-autopilot-toggle';
@@ -848,6 +1004,18 @@
       nearbyThreatCount = 0;
       incomingBulletCount = 0;
       bonusGemCount = 0;
+      packTimers = { overdrive: 0, emp: 0, shield: 0, repair: 0, blink: 0 };
+      waveStartedAt = Number(this.time) || 0;
+      waveDamageTaken = false;
+      cleanWaveStreak = 0;
+      runKills = 0;
+      runGems = 0;
+      gemStreak = 0;
+      gemStreakTimer = 0;
+      survivalClock = 0;
+      lowHullRegenClock = 0;
+      lastBossAlertAt = -Infinity;
+      bossFinalPhase = new WeakSet();
       killChain = 0;
       killChainTimer = 0;
       lastKillAt = -Infinity;
@@ -1300,6 +1468,161 @@
         }
       }
     };
+
+    // Additional tactical systems and run challenges.
+    const originalSpawnWavePack = Game.spawnWave;
+    Game.spawnWave = function() {
+      originalSpawnWavePack.call(this);
+      waveStartedAt = Number(this.time) || 0;
+      waveDamageTaken = false;
+      if (this.wave > 1 && this.wave % 4 === 0 && this.pu) {
+        const view = core.getView();
+        const supplies = ['shield', 'rapid', 'life', 'bomb'];
+        const kind = supplies[(Math.floor(this.wave / 4) - 1) % supplies.length];
+        this.pu.push({ x: view.w * .5, y: view.h * .28, k: kind, t: 22, a: 0 });
+        FX.text(view.w * .5, view.h * .34, 'SUPPLY BEACON · WAVE ' + this.wave, '#6dffb0', 15);
+      }
+    };
+
+    const originalClearWavePack = Game.clearWave;
+    Game.clearWave = function() {
+      const elapsed = Math.max(0, (Number(this.time) || 0) - waveStartedAt);
+      if (!waveDamageTaken) {
+        cleanWaveStreak++;
+        const cleanBonus = this.awardScore(100 + cleanWaveStreak * 25);
+        if (this.p) this.p.shield = Math.max(this.p.shield, 1.5);
+        FX.text(core.getView().w / 2, core.getView().h * .25, 'FLAWLESS WAVE +' + cleanBonus, '#6dffb0', 19);
+        if (cleanWaveStreak % 3 === 0) addFeatureCredits(40, 'CLEAN RUN STREAK');
+      } else cleanWaveStreak = 0;
+      if (elapsed > 0 && elapsed <= 22) {
+        const speedBonus = this.awardScore(150);
+        addFeatureCredits(15, 'SPEED CLEAR');
+        FX.text(core.getView().w / 2, core.getView().h * .3, 'RAPID CLEAR +' + speedBonus, '#ffc23d', 16);
+      }
+      originalClearWavePack.call(this);
+    };
+
+    const originalKillPack = Game.kill;
+    Game.kill = function(enemy) {
+      originalKillPack.call(this, enemy);
+      runKills++;
+      if (runKills % 20 === 0) addFeatureCredits(30, 'ELIMINATION CONTRACT');
+      if (runKills % 15 === 0 && this.p && this.p.hp > 0) {
+        const restored = Math.min(this.p.maxHp - this.p.hp, Math.max(1, Math.ceil(this.p.maxHp * .03)));
+        this.p.hp += restored;
+        if (restored) FX.text(this.p.x, this.p.y - 28, 'FIELD SALVAGE +' + restored, '#6dffb0', 13);
+      }
+      if (killChain >= 10 && killChain % 10 === 0) {
+        const bonus = this.awardScore(75 * Math.floor(killChain / 10));
+        FX.text(enemy.x, enemy.y - 54, 'COMBO CASH +' + bonus, '#ffc23d', 14);
+      }
+      if (killChain >= 20 && killChain % 20 === 0 && this.p) {
+        this.p.shield = Math.max(this.p.shield, 3);
+        FX.ring(this.p.x, this.p.y, 105, '#3df5ff');
+        FX.text(this.p.x, this.p.y - 56, 'KILL CHAIN GUARD', '#3df5ff', 14);
+      }
+      if (enemy && enemy.k === 'boss') {
+        addFeatureCredits(150, 'BOSS CONTRACT');
+        packTimers.overdrive = 0;
+        packTimers.emp = 0;
+        packTimers.shield = 0;
+        packTimers.repair = 0;
+        packTimers.blink = 0;
+        if (this.p) this.p.shield = Math.max(this.p.shield, 5);
+        FX.text(enemy.x, enemy.y - 78, 'BOSS CLEAR · SYSTEMS REFRESHED', '#ffd75a', 16);
+      }
+    };
+
+    const originalGemPack = Game.gem;
+    Game.gem = function(gem) {
+      originalGemPack.call(this, gem);
+      runGems++;
+      gemStreakTimer = 2.6;
+      gemStreak++;
+      if (gemStreak % 5 === 0) {
+        const bonus = this.awardScore(60);
+        FX.text(gem.x, gem.y - 42, 'GEM CHAIN x' + gemStreak + '  +' + bonus, '#6dffb0', 14);
+      }
+      if (runGems % 12 === 0) addFeatureCredits(20, 'CRYSTAL CONTRACT');
+    };
+
+    const originalHurtPack = Game.hurt;
+    Game.hurt = function(amount) {
+      const player = this.p;
+      const before = player ? player.hp : 0;
+      originalHurtPack.call(this, amount);
+      if (player && player.hp < before) {
+        waveDamageTaken = true;
+        gemStreak = 0;
+      }
+    };
+
+    const originalDamagePack = Game.damage;
+    Game.damage = function(enemy, amount) {
+      if (packTimers.overdrive > 0) amount *= 1.65;
+      originalDamagePack.call(this, enemy, amount);
+    };
+
+    const originalUpdatePack = Game.update;
+    Game.update = function(dt) {
+      const active = Game.state === 'play' && this.p && !this.p.dead;
+      if (active) {
+        for (const key of Object.keys(packTimers)) packTimers[key] = Math.max(0, packTimers[key] - dt);
+        gemStreakTimer = Math.max(0, gemStreakTimer - dt);
+        if (gemStreakTimer <= 0) gemStreak = 0;
+        if (packTimers.overdrive > 0) this.p.rapid = Math.max(this.p.rapid, .12);
+        if (this.p.hp <= this.p.maxHp * .25) {
+          lowHullRegenClock += dt;
+          if (lowHullRegenClock >= 4) {
+            lowHullRegenClock = 0;
+            this.p.hp = Math.min(this.p.maxHp, this.p.hp + Math.max(1, Math.ceil(this.p.maxHp * .006)));
+          }
+        } else lowHullRegenClock = 0;
+        survivalClock += dt;
+        if (survivalClock >= 30) {
+          survivalClock %= 30;
+          const bonus = this.awardScore(100);
+          addFeatureCredits(10, 'SURVIVAL STIPEND');
+          FX.text(this.p.x, this.p.y - 64, '30s SURVIVED +' + bonus, '#3df5ff', 14);
+        }
+      }
+      originalUpdatePack.call(this, dt);
+      if (Game.state === 'play' && this.p && !this.p.dead) {
+        for (const boss of this.enemies) {
+          if (!boss || boss.dead || boss.k !== 'boss') continue;
+          const ratio = boss.hp / Math.max(1, boss.mhp || boss.hp || 1);
+          if (ratio <= .2 && !bossFinalPhase.has(boss)) {
+            bossFinalPhase.add(boss);
+            boss.featureFinalClock = 0;
+            for (let i = 0; i < 16; i++) {
+              const angle = i * Math.PI * 2 / 16;
+              this.eb.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 275, vy: Math.sin(angle) * 275, life: 5, damage: 14 });
+            }
+            FX.ring(boss.x, boss.y, 290, '#ff718c');
+            FX.text(boss.x, boss.y - 80, 'BOSS FINAL PHASE · 20%', '#ff718c', 20);
+          }
+          if (bossFinalPhase.has(boss)) {
+            boss.featureFinalClock = (boss.featureFinalClock || 0) + dt;
+            if (boss.featureFinalClock >= 1.25) {
+              boss.featureFinalClock = 0;
+              for (let i = 0; i < 16; i++) {
+                const angle = i * Math.PI * 2 / 16 + this.time * .18;
+                this.eb.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 265, vy: Math.sin(angle) * 265, life: 5, damage: 14 });
+              }
+            }
+          }
+          if (Math.hypot(boss.x - this.p.x, boss.y - this.p.y) < 190 && this.time - lastBossAlertAt > 4) {
+            lastBossAlertAt = this.time;
+            FX.text(this.p.x, this.p.y - 76, 'DANGER · BOSS IN CLOSE RANGE', '#ff718c', 14);
+          }
+        }
+        abilityHudClock -= dt;
+        if (abilityHudClock <= 0) {
+          abilityHudClock = .15;
+          updateFeatureAbilityDock();
+        }
+      } else updateFeatureAbilityDock();
+    };
   }
 
   function normalizeStats(source) {
@@ -1436,6 +1759,14 @@
       if (Game.state === 'play' && event.code === 'KeyE' && !event.repeat) {
         event.preventDefault();
         activateNova();
+      }
+      if (Game.state === 'play' && !event.repeat) {
+        const abilities = {
+          KeyQ: useOverdrive, KeyR: useEmp, KeyF: useShieldBurst,
+          KeyC: useRepairKit, KeyX: useBlink, KeyT: useTacticalScan
+        };
+        const ability = abilities[event.code];
+        if (ability) { event.preventDefault(); ability(); }
       }
     });
   }
