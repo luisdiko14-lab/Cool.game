@@ -157,6 +157,20 @@
   let lastBossAlertAt = -Infinity;
   let bossFinalPhase = new WeakSet();
 
+  const ultimateFeatureInstallers = [];
+  const ultimateState = {
+    droneClock: 0, droneAngle: 0, sentry: null, sentryCooldown: 0,
+    mines: [], mineCooldown: 0, gadgetDock: null, gadgetButtons: {},
+    heat: 0, overheated: 0, overdriveWasActive: false,
+    chainGuard: false, lifeStealClock: 0, piercingVolley: 0,
+    bossTelegraph: new WeakSet(), bossPatternClock: new WeakMap(),
+    eliteAffixClock: new WeakMap(), waveMutator: null,
+    objective: null, treasureWave: 0, rescueClock: 0,
+    cleanStreak: 0, perks: [], perkDraftOpen: false, perkQueue: 0,
+    perkOverlay: null, mastery: { standard: 0, scatter: 0, rapid: 0, lance: 0 },
+    previousBest: 0, bestChallengeClaimed: false, waveObjectiveClaimed: false
+  };
+
   function saveState() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -1624,6 +1638,10 @@
         }
       } else updateFeatureAbilityDock();
     };
+    for (const installUltimateFeature of ultimateFeatureInstallers) {
+      try { installUltimateFeature(); }
+      catch (error) { console.error('Neon Swarm feature installation failed:', error); }
+    }
   }
 
   function normalizeStats(source) {
