@@ -8,7 +8,8 @@
   const STORAGE_KEY = 'neonswarm.features';
   const MODE_NAMES = {
     campaign: 'Campaign', daily: 'Daily challenge', endless: 'Endless survival',
-    boss: 'Boss rush', coop: 'Local co-op'
+    boss: 'Boss rush', coop: 'Local co-op', timeattack: 'Time attack',
+    bullethell: 'Bullet hell', survival: 'Veteran survival'
   };
   const WEAPONS = {
     standard: 'Standard', scatter: 'Scatter', rapid: 'Rapid pulse', lance: 'Lance'
@@ -72,6 +73,7 @@
       }
       return {
         mode: MODE_NAMES[saved.mode] ? saved.mode : 'campaign',
+        autopilot: saved.autopilot === true,
         weapon: WEAPONS[saved.weapon] ? saved.weapon : 'standard',
         loadout: LOADOUTS[saved.loadout] ? saved.loadout : 'balanced',
         accessibility: ACCESSIBILITY[saved.accessibility] ? saved.accessibility : 'standard',
@@ -85,7 +87,7 @@
     } catch (_) {
       return {
         mode: 'campaign', weapon: 'standard', loadout: 'balanced', accessibility: 'standard',
-        endlessBest: 0, dailyScores: {}, mission: makeMission(), lastReplay: null
+        endlessBest: 0, dailyScores: {}, mission: makeMission(), lastReplay: null, autopilot: false
       };
     }
   }
@@ -186,6 +188,7 @@
         <ol id="feature-daily-scores" class="feature-daily-scores" aria-label="Today's daily challenge leaderboard"></ol>
         <div class="feature-row" id="feature-modes"></div>
         <p id="feature-mode-note" class="feature-note"></p>
+        <div class="feature-row" id="feature-autopilot"></div>
         <button id="feature-launch" type="button">Launch selected run</button>
       </div>
       <div class="feature-content" data-feature-view="gear" hidden>
@@ -284,7 +287,10 @@
       ['daily', 'Daily challenge', 'One rotating rule set, shared by date.'],
       ['endless', 'Endless survival', 'Keep fighting after wave 60.'],
       ['boss', 'Boss rush', 'Five major bosses, one continuous run.'],
-      ['coop', 'Local co-op', 'Arrow keys pilot a second support ship.']
+      ['coop', 'Local co-op', 'Arrow keys pilot a second support ship.'],
+      ['timeattack', 'Time attack', 'Score as much as possible before 90 seconds run out.'],
+      ['bullethell', 'Bullet hell', 'Dodge extra incoming projectile volleys.'],
+      ['survival', 'Veteran survival', 'Start at wave 10 and fight endless escalating waves.']
     ];
     const modeHost = document.getElementById('feature-modes');
     modeHost.replaceChildren();
@@ -310,13 +316,24 @@
       });
     }
     document.getElementById('feature-daily').textContent = `DAILY ${utcDate()} · ${rule.title}: ${rule.detail}`;
-    document.getElementById('feature-mode-note').textContent = state.mode === 'endless'
-      ? `Endless best: wave ${state.endlessBest}.`
+    document.getElementById('feature-mode-note').textContent = state.mode === 'endless' || state.mode === 'survival'
+      ? `Endless best: wave ${state.endlessBest}. ${state.mode === 'survival' ? 'Veteran survival begins at wave 10.' : ''}`
       : state.mode === 'boss'
         ? 'Bosses: waves 5, 10, 30, 50, and 60.'
         : state.mode === 'coop'
           ? 'Pilot 1: WASD / touch. Pilot 2: arrow keys; weapon auto-fires.'
-          : 'Select a mode, then launch it from here or the main menu.';
+          : state.mode === 'timeattack'
+            ? '90 seconds. Your final score is the target.'
+            : state.mode === 'bullethell'
+              ? 'Watch for extra incoming volleys from above.'
+              : 'Select a mode, then launch it from here or the main menu.';
+    const autopilotHost = document.getElementById('feature-autopilot');
+    autopilotHost.replaceChildren();
+    buttonChoice(autopilotHost, 'autopilot', state.autopilot ? 'Autopilot: ON' : 'Autopilot: OFF', 'AI steering avoids enemies and incoming shots, and collects nearby supplies. Toggle during a run too.', state.autopilot ? 'autopilot' : '', () => {
+      state.autopilot = !state.autopilot;
+      saveState();
+      renderAll();
+    });
 
     const weaponHost = document.getElementById('feature-weapons');
     weaponHost.replaceChildren();
@@ -536,6 +553,48 @@
   }
 
   function installHooks() {
+    const autopilotButton = document.createElement('button');
+    autopilotButton.type = 'button';
+    autopilotButton.id = 'feature-autopilot-toggle';
+    autopilotButton.className = 'alt';
+    autopilotButton.style.cssText = 'position:fixed;z-index:30;right:14px;top:calc(env(safe-area-inset-top,0px) + 14px);display:none;padding:9px 12px;font-size:11px;pointer-events:auto;';
+    autopilotButton.addEventListener('click', () => { state.autopilot = !state.autopilot; saveState(); updateAutopilotButton(); });
+    document.body.append(autopilotButton);
+    function updateAutopilotButton() {
+      autopilotButton.textContent = state.autopilot ? '✦ AUTOPILOT ON' : '✦ AUTOPILOT OFF';
+      autopilotButton.style.borderColor = state.autopilot ? '#6dffb0' : 'rgba(61,245,255,.45)';
+      autopilotButton.style.display = Game.state === 'play' ? 'block' : 'none';
+    }
+    const originalSetForAutopilot = Game.set;
+    Game.set = function(nextState) { originalSetForAutopilot.call(this, nextState); updateAutopilotButton(); };
+    const originalVector = Input.vec;
+    Input.vec = function() {
+      if (!state.autopilot || Game.state !== 'play' || !Game.p) return originalVector.call(this);
+      const p = Game.p, view = core.getView();
+      let x = (view.w * .5 - p.x) * .0012, y = (view.h * .58 - p.y) * .0012;
+      const repel = (tx, ty, radius, weight) => {
+        const dx = p.x - tx, dy = p.y - ty, d2 = dx * dx + dy * dy;
+        if (d2 < radius * radius) { const d = Math.sqrt(d2) || 1; const force = (1 - d / radius) * weight; x += dx / d * force; y += dy / d * force; }
+      };
+      for (const enemy of Game.enemies) if (!enemy.dead && Game.onScreen(enemy)) repel(enemy.x, enemy.y, enemy.k === 'boss' ? 190 : 100, enemy.k === 'boss' ? 2.4 : 1.7);
+      for (const bullet of Game.eb) repel(bullet.x + bullet.vx * .28, bullet.y + bullet.vy * .28, 78, 2.8);
+      let target = null, targetDistance = Infinity;
+      for (const item of [...Game.gems, ...Game.pu]) {
+        if (item.dead || item.t <= 0) continue;
+        const d = Math.hypot(item.x - p.x, item.y - p.y);
+        if ((item.k !== 'life' || p.hp < p.maxHp * .88) && d < targetDistance) { target = item; targetDistance = d; }
+      }
+      if (target && targetDistance < 230) { x += (target.x - p.x) / Math.max(1, targetDistance) * .85; y += (target.y - p.y) / Math.max(1, targetDistance) * .85; }
+      const margin = 54;
+      if (p.x < margin) x += (margin - p.x) / margin * 1.8;
+      if (p.x > view.w - margin) x -= (p.x - (view.w - margin)) / margin * 1.8;
+      if (p.y < margin) y += (margin - p.y) / margin * 1.8;
+      if (p.y > view.h - margin) y -= (p.y - (view.h - margin)) / margin * 1.8;
+      const length = Math.hypot(x, y);
+      if (length > 1) { x /= length; y /= length; }
+      if (Game.eb.some(b => Math.hypot(b.x - p.x, b.y - p.y) < 46) && p.dashCd <= 0) Input.dash = true;
+      return { x, y };
+    };
     const originalStart = Game.start;
     Game.start = function() {
       runMode = state.mode;
@@ -548,6 +607,14 @@
       sampleClock = 0;
       runRecorded = false;
       originalStart.call(this);
+      if (runMode === 'survival') {
+        this.wave = 10;
+        this.enemies.length = 0;
+        this.spawnWave();
+        FX.text(core.getView().w / 2, core.getView().h * .3, 'VETERAN SURVIVAL · WAVE 10', '#ff3df5', 24);
+      }
+      this.modeClock = 0;
+      this.extraVolleyClock = 0;
       if (runMode === 'coop') {
         const view = core.getView();
         this.pilot2 = { x: view.w * .25, y: view.h * .82, cooldown: .1 };
@@ -604,7 +671,7 @@
       if (runMode === 'daily' && state.mode === 'daily' && dailyRule(runDate).health && kind !== 'boss') {
         health = Math.ceil(health * dailyRule(runDate).health);
       }
-      if (runMode === 'endless' && this.wave > MAX_WAVE && Number.isFinite(health)) {
+      if ((runMode === 'endless' || runMode === 'survival') && this.wave > MAX_WAVE && Number.isFinite(health)) {
         health = Math.ceil(health * (1 + (this.wave - MAX_WAVE) * .06));
       }
       return originalAdd.call(this, kind, x, y, health);
@@ -615,7 +682,7 @@
       if (runMode === 'boss' && state.mode === 'boss') {
         this.wave = BOSS_WAVES[Math.min(this.bossRushIndex, BOSS_WAVES.length - 1)];
       }
-      if (runMode === 'endless' && this.wave > MAX_WAVE && this.wave % 5 === 0) {
+      if ((runMode === 'endless' || runMode === 'survival') && this.wave > MAX_WAVE && this.wave % 5 === 0) {
         const view = core.getView();
         this.add('boss', view.w / 2, view.h * .2, 1000000);
         FX.text(view.w / 2, view.h * .34, `ENDLESS BOSS · WAVE ${this.wave}`, '#ff3df5', 26);
@@ -635,7 +702,7 @@
 
     const originalVictory = Game.victory;
     Game.victory = function() {
-      if (runMode === 'endless' && state.mode === 'endless') {
+      if ((runMode === 'endless' && state.mode === 'endless') || runMode === 'survival') {
         this.wave++;
         this.betweenWaves = false;
         this.spawnWave();
@@ -725,6 +792,27 @@
     const originalUpdate = Game.update;
     Game.update = function(dt) {
       originalUpdate.call(this, dt);
+      if (Game.state === 'play' && runMode === 'timeattack') {
+        this.modeClock = (this.modeClock || 0) + dt;
+        const remaining = Math.max(0, 90 - this.modeClock);
+        if (!this.timeAttackHudAt || this.time - this.timeAttackHudAt > .5) {
+          this.timeAttackHudAt = this.time;
+          FX.text(core.getView().w / 2, 42, 'TIME ATTACK · ' + remaining.toFixed(1) + 's', '#ffc23d', 16);
+        }
+        if (remaining <= 0) { this.over(); return; }
+      }
+      if (Game.state === 'play' && runMode === 'bullethell') {
+        this.extraVolleyClock = (this.extraVolleyClock || 0) + dt;
+        if (this.extraVolleyClock >= 1.8) {
+          this.extraVolleyClock = 0;
+          const view = core.getView(), originX = Math.random() * view.w;
+          for (let n = -2; n <= 2; n++) {
+            const angle = Math.PI / 2 + n * .19;
+            this.eb.push({x:originX + n * 13,y:-8,vx:Math.cos(angle)*150,vy:Math.sin(angle)*230,life:5,damage:8});
+          }
+          FX.text(originX, 70, 'INCOMING!', '#ff3d9a', 12);
+        }
+      }
       if (state.accessibility === 'calm') {
         FX.flash = 0;
         FX.shake = Math.min(FX.shake, 3);
