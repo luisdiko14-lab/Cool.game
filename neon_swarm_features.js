@@ -2052,5 +2052,20 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installExecutionBonus() {
+    const originalDamage = Game.damage;
+    Game.damage = function(enemy, amount) {
+      if (enemy && !enemy.dead && Number(enemy.mhp)>0 && enemy.hp/enemy.mhp<=.22) {
+        amount *= 1.32;
+        if (!enemy.featureExecutionShown) {
+          enemy.featureExecutionShown = true;
+          FX.text(enemy.x,enemy.y-(enemy.r||12)-30,'EXECUTION WINDOW','#ff718c',12);
+        }
+      }
+      originalDamage.call(this,enemy,amount);
+    };
+  });
+
   init();
 })();
