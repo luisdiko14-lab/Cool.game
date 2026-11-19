@@ -1891,5 +1891,58 @@
     });
   });
 
+
+  ultimateFeatureInstallers.push(function installProximityMines() {
+    function deployMine() {
+      if (Game.state !== 'play' || !Game.p || ultimateState.mineCooldown > 0) return;
+      const p = Game.p;
+      ultimateState.mines.push({ x: p.x - Math.cos(p.face || 0) * 24, y: p.y - Math.sin(p.face || 0) * 24, life: 18 });
+      if (ultimateState.mines.length > 3) ultimateState.mines.shift();
+      ultimateState.mineCooldown = 12;
+      FX.ring(p.x, p.y, 55, '#ffc23d');
+      FX.text(p.x, p.y - 38, 'PROXIMITY MINE SET', '#ffc23d', 14);
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.style.cssText = 'padding:9px 10px;border:1px solid rgba(255,194,61,.6);border-radius:7px;background:#261a0a;color:#ffe6ae;font:800 10px ui-monospace,monospace;';
+    button.textContent = 'MINE [H]';
+    button.addEventListener('click', deployMine);
+    ultimateState.gadgetDock?.append(button);
+    ultimateState.gadgetButtons.mine = button;
+    const originalUpdate = Game.update;
+    Game.update = function(dt) {
+      originalUpdate.call(this, dt);
+      if (Game.state !== 'play' || !this.p || this.p.dead) return;
+      ultimateState.mineCooldown = Math.max(0, ultimateState.mineCooldown - dt);
+      button.disabled = ultimateState.mineCooldown > 0;
+      button.textContent = ultimateState.mineCooldown > 0 ? 'MINE '+Math.ceil(ultimateState.mineCooldown)+'s' : 'MINE [H]';
+      for (const mine of [...ultimateState.mines]) {
+        mine.life -= dt;
+        if (mine.life <= 0) {
+          ultimateState.mines = ultimateState.mines.filter(item => item !== mine);
+          continue;
+        }
+        if (Math.random() < .16) FX.burst(mine.x, mine.y, '#ffc23d', 1, 13, .18, 2);
+        const target = this.enemies.find(enemy => !enemy.dead && Math.hypot(enemy.x-mine.x,enemy.y-mine.y) < 82);
+        if (!target) continue;
+        FX.ring(mine.x, mine.y, 170, '#ffc23d');
+        FX.text(mine.x, mine.y - 24, 'MINE DETONATED', '#ffc23d', 13);
+        for (const enemy of this.enemies) {
+          if (!enemy.dead && Math.hypot(enemy.x-mine.x,enemy.y-mine.y) < 170) {
+            this.damage(enemy, Math.max(25, 28 + this.lvl * 9));
+          }
+        }
+        for (const projectile of this.eb) if (Math.hypot(projectile.x-mine.x,projectile.y-mine.y) < 190) projectile.life = 0;
+        ultimateState.mines = ultimateState.mines.filter(item => item !== mine);
+      }
+    };
+    window.addEventListener('keydown', event => {
+      if (Game.state === 'play' && event.code === 'KeyH' && !event.repeat) {
+        event.preventDefault();
+        deployMine();
+      }
+    });
+  });
+
   init();
 })();
