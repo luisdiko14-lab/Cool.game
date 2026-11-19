@@ -16,6 +16,7 @@ import os
 import re
 import secrets
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -1242,7 +1243,15 @@ def run_gui(host, start_port, gui_smoke_test=False):
     ).pack(pady=(16, 0))
 
     started_at = time.monotonic()
+    server_stop_lock = threading.Lock()
+    server_stopped = False
+
     def stop_server():
+        nonlocal server_stopped
+        with server_stop_lock:
+            if server_stopped:
+                return
+            server_stopped = True
         print("[shutdown] Stopping the game server.", flush=True)
         server.shutdown()
         server.server_close()
@@ -1308,12 +1317,44 @@ def run_gui(host, start_port, gui_smoke_test=False):
         try:
             import webview
 
+            def relaunch_after_demo():
+                time.sleep(0.7)
+                try:
+                    stop_server()
+                    if getattr(sys, "frozen", False) or Path(sys.argv[0]).suffix.lower() == ".exe":
+                        command = [sys.executable, *sys.argv[1:]]
+                    else:
+                        command = [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]]
+                        if "--gui" not in command and "--gui-smoke-test" not in command and "--server" not in command:
+                            command.append("--gui")
+                    subprocess.Popen(
+                        command,
+                        cwd=str(APP_DIR),
+                        close_fds=True,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                    print("[update-demo] Relaunching Neon Swarm. No update files were downloaded.", flush=True)
+                    os._exit(0)
+                except Exception as error:
+                    print(
+                        f"[update-demo] Automatic restart failed ({type(error).__name__}: {error}).",
+                        flush=True,
+                    )
+
+            class DesktopBridge:
+                def restart_demo(self):
+                    if gui_smoke_test:
+                        return {"accepted": False, "reason": "Restart disabled during GUI smoke test."}
+                    threading.Thread(target=relaunch_after_demo, name="neon-swarm-demo-restart", daemon=True).start()
+                    return {"accepted": True}
+
             window = webview.create_window(
                 "Neon Swarm v2",
                 url,
                 width=1100,
                 height=760,
                 min_size=(640, 480),
+                js_api=DesktopBridge(),
             )
 
             def verify_mission_control():
