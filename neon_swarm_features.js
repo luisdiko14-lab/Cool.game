@@ -1295,7 +1295,7 @@
     const originalDamage = Game.damage;
     Game.damage = function(enemy, amount) {
       if (runMode === 'hardcore') amount += 10000;
-      if (Math.random() < .12) {
+      if (Math.random() < Math.min(.45, .12 + (Number(ultimateState.critBonus) || 0))) {
         amount *= 2.5;
         if (enemy && typeof enemy === 'object') enemy.featureCriticalSequence = (Number(enemy.featureCriticalSequence) || 0) + 1;
         if (enemy && Number.isFinite(enemy.x) && Number.isFinite(enemy.y)) FX.text(enemy.x, enemy.y - (enemy.r || 12) - 12, 'CRITICAL!', '#ffe36e', 15);
@@ -2402,6 +2402,141 @@
         FX.text(core.getView().w/2,core.getView().h*.36,'5-WAVE STREAK · +'+reward+' · REPAIR','#ffc23d',19);
       }
     };
+  });
+
+
+  ultimateFeatureInstallers.push(function installLevelUpPerkDraft() {
+    const catalog=[
+      {id:'rounds',name:'Overclocked Rounds',description:'Increase every hit by 8%.',kind:'attack'},
+      {id:'critical',name:'Critical Protocol',description:'Raise critical-hit chance by 2.5%.',kind:'attack'},
+      {id:'rapid',name:'Rapid Recycler',description:'Gain 6 seconds of rapid fire.',kind:'attack'},
+      {id:'repair',name:'Nanite Repair',description:'Restore 14% of your maximum hull.',kind:'defense'},
+      {id:'vitality',name:'Reinforced Hull',description:'Add 18 maximum hull and repair it.',kind:'defense'},
+      {id:'shield',name:'Guardian Matrix',description:'Gain 4 seconds of shield.',kind:'defense'},
+      {id:'drone',name:'Drone AI Upgrade',description:'Increase orbital drone damage by 18%.',kind:'tech'},
+      {id:'magnet',name:'Magnetic Core',description:'Increase gem and pickup attraction range.',kind:'tech'},
+      {id:'dash',name:'Dash Capacitor',description:'Improve dash recharge speed for this run.',kind:'tech'},
+      {id:'score',name:'Quantum Score',description:'Increase score earned from all actions.',kind:'economy'},
+      {id:'credits',name:'Salvage License',description:'Receive 35 credits immediately.',kind:'economy'}
+    ];
+    ultimateState.perks=[];
+    ultimateState.damagePerkMultiplier=1;
+    ultimateState.droneDamageMultiplier=1;
+    ultimateState.scorePerkMultiplier=1;
+    ultimateState.critBonus=0;
+    ultimateState.magnetRadius=270;
+    ultimateState.dashRechargeBonus=0;
+    ultimateState.rollPerkRarity=ultimateState.rollPerkRarity||(()=> 'FIELD');
+    ultimateState.perkPower=ultimateState.perkPower||{FIELD:1};
+    const style=document.createElement('style');
+    style.textContent='#ultimate-perk-overlay{position:fixed;inset:0;z-index:1100;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(3,5,18,.88);backdrop-filter:blur(12px)}#ultimate-perk-card{width:min(720px,96vw);padding:22px;border:1px solid rgba(61,245,255,.45);border-radius:16px;background:linear-gradient(145deg,#101a35,#17092c);color:#f4f8ff;box-shadow:0 18px 70px rgba(0,0,0,.6);text-align:center}#ultimate-perk-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:16px}#ultimate-perk-options button{min-height:140px;padding:14px;border:1px solid rgba(61,245,255,.35);border-radius:10px;background:rgba(17,8,43,.92);color:#f4f8ff;text-align:left}#ultimate-perk-options button strong,#ultimate-perk-options button small,#ultimate-perk-options button em{display:block}#ultimate-perk-options button small{margin-top:8px;color:#b2c5e4;line-height:1.4}#ultimate-perk-options button em{margin-top:12px;color:#3df5ff;font-size:10px;font-style:normal;font-weight:900}@media(max-width:600px){#ultimate-perk-card{padding:13px}#ultimate-perk-options{grid-template-columns:1fr;max-height:58vh;overflow:auto}#ultimate-perk-options button{min-height:78px}}';
+    document.head.append(style);
+    const overlay=document.createElement('div');
+    overlay.id='ultimate-perk-overlay';
+    overlay.innerHTML='<section id="ultimate-perk-card"><h2>LEVEL UP · CHOOSE A PERK</h2><p id="ultimate-perk-subtitle">Select one upgrade to shape this run.</p><div id="ultimate-perk-options"></div></section>';
+    document.body.append(overlay);
+    ultimateState.perkOverlay=overlay;
+
+    ultimateState.applyPerk=function(perk,rarity){
+      const power=Number(ultimateState.perkPower[rarity])||1;
+      const p=Game.p;
+      ultimateState.perks.push({id:perk.id,kind:perk.kind,rarity});
+      if(perk.id==='rounds') ultimateState.damagePerkMultiplier*=1+.08*power;
+      if(perk.id==='critical') ultimateState.critBonus=Math.min(.28,ultimateState.critBonus+.025*power);
+      if(perk.id==='rapid'&&p) p.rapid=Math.max(p.rapid,6*power);
+      if(perk.id==='repair'&&p) p.hp=Math.min(p.maxHp,p.hp+Math.ceil(p.maxHp*.14*power));
+      if(perk.id==='vitality'&&p){const bonus=Math.ceil(18*power);p.maxHp+=bonus;p.hp+=bonus;}
+      if(perk.id==='shield'&&p) p.shield=Math.max(p.shield,4*power);
+      if(perk.id==='drone') ultimateState.droneDamageMultiplier*=1+.18*power;
+      if(perk.id==='magnet') ultimateState.magnetRadius=Math.min(620,ultimateState.magnetRadius+65*power);
+      if(perk.id==='dash') ultimateState.dashRechargeBonus=Math.min(.55,ultimateState.dashRechargeBonus+.12*power);
+      if(perk.id==='score') ultimateState.scorePerkMultiplier*=1+.08*power;
+      if(perk.id==='credits') addFeatureCredits(Math.round(35*power),'SALVAGE LICENSE');
+      FX.text(core.getView().w/2,core.getView().h*.23,rarity+' · '+perk.name,'#ffc23d',17);
+      saveState();
+    };
+
+    function openDraft(){
+      if(ultimateState.perkDraftOpen||ultimateState.perkQueue<=0) return;
+      ultimateState.perkDraftOpen=true;
+      if(Game.state==='play') Game.pause();
+      const host=document.getElementById('ultimate-perk-options');
+      host.replaceChildren();
+      const pool=catalog.slice();
+      const picks=[];
+      while(picks.length<3&&pool.length){
+        const index=Math.floor(Math.random()*pool.length);
+        picks.push(pool.splice(index,1)[0]);
+      }
+      document.getElementById('ultimate-perk-subtitle').textContent='Choose one of three upgrades · '+ultimateState.perks.length+' perks already selected';
+      for(const perk of picks){
+        const rarity=ultimateState.rollPerkRarity();
+        const button=document.createElement('button');
+        const power=Number(ultimateState.perkPower[rarity])||1;
+        button.innerHTML='<strong>'+perk.name+'</strong><small>'+perk.description+'</small><em>'+rarity+' · POWER x'+power.toFixed(2)+'</em>';
+        button.addEventListener('click',()=>{
+          ultimateState.applyPerk(perk,rarity);
+          ultimateState.perkQueue=Math.max(0,ultimateState.perkQueue-1);
+          ultimateState.perkDraftOpen=false;
+          overlay.style.display='none';
+          if(ultimateState.perkQueue>0) openDraft();
+          else if(Game.state==='pause') Game.resume();
+        });
+        host.append(button);
+      }
+      overlay.style.display='flex';
+    }
+    ultimateState.queuePerkDraft=function(){
+      ultimateState.perkQueue=(Number(ultimateState.perkQueue)||0)+1;
+      openDraft();
+    };
+
+    const originalStart=Game.start;
+    Game.start=function(){
+      ultimateState.perks=[];
+      ultimateState.damagePerkMultiplier=1;
+      ultimateState.droneDamageMultiplier=1;
+      ultimateState.scorePerkMultiplier=1;
+      ultimateState.critBonus=0;
+      ultimateState.magnetRadius=270;
+      ultimateState.dashRechargeBonus=0;
+      ultimateState.perkQueue=0;
+      ultimateState.perkDraftOpen=false;
+      overlay.style.display='none';
+      originalStart.call(this);
+    };
+    const originalLevelUp=Game.levelUp;
+    Game.levelUp=function(){
+      originalLevelUp.call(this);
+      ultimateState.queuePerkDraft();
+    };
+    const originalDamage=Game.damage;
+    Game.damage=function(enemy,amount){
+      originalDamage.call(this,enemy,amount*ultimateState.damagePerkMultiplier);
+    };
+    const originalAward=Game.awardScore;
+    Game.awardScore=function(points){
+      return originalAward.call(this,points*ultimateState.scorePerkMultiplier);
+    };
+    const originalUpdate=Game.update;
+    Game.update=function(dt){
+      originalUpdate.call(this,dt);
+      if(Game.state!=='play'||!this.p||this.p.dead) return;
+      for(const item of [...this.gems,...this.pu]){
+        if(!item||item.dead||item.t<=0) continue;
+        const dx=this.p.x-item.x,dy=this.p.y-item.y,d=Math.hypot(dx,dy)||1;
+        if(d>120&&d<ultimateState.magnetRadius){
+          const speed=210+260*(1-d/ultimateState.magnetRadius);
+          item.x+=dx/d*speed*dt;item.y+=dy/d*speed*dt;
+        }
+      }
+      if(ultimateState.dashRechargeBonus>0&&this.p.dashCd>0) this.p.dashCd=Math.max(0,this.p.dashCd-dt*ultimateState.dashRechargeBonus);
+    };
+    const marker="      if (Math.random() < .12) {";
+    if(contentMarkerAvailable(marker)) {
+      // The actual source patch below is applied by the repository writer.
+    }
+    function contentMarkerAvailable(){return true}
   });
 
   init();
