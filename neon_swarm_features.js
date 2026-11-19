@@ -2335,5 +2335,27 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installTreasureWaves() {
+    const originalSpawn=Game.spawnWave;
+    Game.spawnWave=function(){
+      originalSpawn.call(this);
+      if(this.wave%7!==0||ultimateState.treasureWave===this.wave) return;
+      ultimateState.treasureWave=this.wave;
+      const view=core.getView();
+      for(let i=0;i<12;i++){
+        const angle=i*Math.PI*2/12;
+        this.gems.push({x:view.w*.5+Math.cos(angle)*115,y:view.h*.34+Math.sin(angle)*58,vx:Math.cos(angle)*45,vy:Math.sin(angle)*45,a:angle});
+      }
+      FX.ring(view.w*.5,view.h*.34,260,'#ffc23d');
+      FX.text(view.w*.5,view.h*.34,'TREASURE WAVE · 12 CRYSTALS','#ffc23d',20);
+    };
+    const originalGem=Game.gem;
+    Game.gem=function(gem){
+      originalGem.call(this,gem);
+      if(ultimateState.treasureWave===this.wave) addFeatureCredits(2,'TREASURE CRYSTAL');
+    };
+  });
+
   init();
 })();
