@@ -14,6 +14,39 @@ You start with 200/200 HP. Enemy projectiles deal 10 damage. Health pickups rest
 
 Open [`Neon Swarm.html`](Neon%20Swarm.html) in a modern browser. It needs no installation or build step. Personal high scores, settings, credits, selected ship skins, and arcade records are stored in that browser for that page's site address. Opening the HTML file and opening the Python server use separate browser storage. The **Other games!** hub contains Snake, 2048, and Memory Match. The Settings screen controls music and effects volume. The **Modes & features** panel includes daily and endless runs, boss rush, local co-op, weapon and loadout choices, daily missions, a flight recorder, and accessibility options. Its Records & achievements view tracks lifetime kills, gems, cleared waves, bosses, score, and completed runs, awarding credits when milestones unlock. It also includes an optional AI autopilot that steers around enemies and incoming shots while collecting nearby supplies, plus Time Attack (90-second score run), Bullet Hell (extra projectile volleys), Veteran Survival (endless waves starting at wave 10), and Hardcore (100,000 player HP, +10,000 damage on every wave, a 25,000-HP boss on every wave from 1–20, 25,000-HP enemies through wave 20, and a repeating 30-orb / 100-damage wave-60 barrage).  Combat also includes ten new features: a live tactical HUD, boss health bar, 12% critical-hit chance (2.5x damage), kill-streak score bonuses every five kills, near-miss score rewards, a dash pulse that clears nearby projectiles and damages nearby enemies, 8% hull repair after each cleared wave, a longer-range pickup magnet, a Nova screen burst on **E** or its on-screen button (25-second cooldown), and one emergency revive per run at 35% hull.  It now adds 15 more features: passive hull regeneration, delayed shield recharge, combo-earned shields, elite enemies every fourth wave, elite kill bonuses, elite/boss reward bonuses, a 50%-HP boss enrage phase, five-wave milestone score rewards, a gem jackpot every ten gems, level-up hull repair, dash cooldown reductions every ten kills, a nearby-threat radar, critical-hull warnings, projectile-storm warnings, and keyboard shortcuts (**P** to pause/resume, **A** to toggle autopilot).  The 25-system combat and progression pack adds an orbiting combat drone, deployable sentry turret, proximity mines, critical-hit chain lightning, periodic piercing volleys, kill-triggered lifesteal, shield reflection, stacking armor break, low-health execution damage, and a heat-managed weapon overdrive. Bosses can be staggered, telegraph aimed volleys, and unleash rotating nova patterns. Elite enemies gain Bulwark, Volatile, Commander, or Medic affixes. Every third wave can carry a score/health/fire-rate mutator; wave contracts reward optional objectives; rescue pods arrive during long runs; every seventh wave becomes a 12-crystal treasure wave; post-campaign endless play gains escalating projectile fractures; and five flawless clears award a victory streak bonus. Level-ups open a three-choice perk draft with Field, Rare, and Legendary rarities, perk-pair synergies, weapon mastery rewards every 25 kills, and a personal-best challenge bonus. The next feature pack adds five active tactical abilities: **Overdrive** (Q, temporary fire-rate and damage boost), **EMP** (R, clears hostile shots and damages enemies), **Guardian Shield** (F), **Field Repair** (C), and **Phase Blink** (X). **Tactical Scan** (T) marks the three nearest threats. New run systems include flawless-wave bonuses and streak credits, a 22-second rapid-clear bounty, supply beacons every four waves, elimination contracts, kill-chain score and shield rewards, periodic hull salvage, gem-chain bonuses and crystal contracts, boss bounty credits with ability refresh, a 20%-health boss final phase with radial volleys, close-range boss warnings, low-hull regeneration, and a score/credit stipend for every 30 seconds survived. An in-game ability dock displays cooldowns and wave stats; all five buttons also work on touch screens. These are client-side game mechanics and rewards, not server-verified competitive results. The bundled `Raya(Slowed).mp3` track starts after pressing Start. The Windows desktop edition also has a **Check for updates** demo: it displays a 1–100% progress window at 0.35-second intervals and restarts the app when complete. It is explicitly a simulation; it does not contact an update server or download/replace any files. Phones get an on-screen joystick and dash button. The Syne font is optional and loads from Google Fonts when online.
 
+
+### Expansion pack: 25 additional systems
+
+The separately loaded `neon_swarm_expansion.js` adds another layer of run mechanics without replacing the original engine:
+
+1. Rotating bounty contracts that mark a live target.
+2. Bonus score and credits for completing a bounty.
+3. Timed kill-chain tracking with escalating score rewards.
+4. Chain milestones that grant a short shield.
+5. Precision focus earned by surviving without taking damage.
+6. Focus overdrive that briefly activates rapid fire.
+7. Dash shockwaves that clear nearby hostile shots.
+8. Dash impact damage against nearby non-boss enemies.
+9. Perfect-dodge rewards for clearing bullets during a dash.
+10. A once-per-run emergency barrier at critical hull.
+11. Nanite hull regeneration after avoiding damage.
+12. Boss health phase transitions at 75%, 50%, and 25%.
+13. Boss reinforcement calls during later phases.
+14. A final-phase radial core-breach barrage.
+15. Boss-clear supply caches with life and shield pickups.
+16. Random armored enemy traits with damage resistance.
+17. Volatile enemies that damage nearby enemies when destroyed.
+18. Medic enemies that periodically heal nearby allies.
+19. Commander enemies that accelerate nearby hostile shots.
+20. Sniper enemies that fire fast aimed projectiles.
+21. Weapon mastery progression tracked by selected weapon.
+22. Mastery rank rewards and escalating weapon damage bonuses.
+23. Crystal resonance that grants shield time and credits at gem milestones.
+24. A between-wave requisition draft with four run upgrades.
+25. Timed survival payouts that award score and credits.
+
+The expansion HUD reports bounty status, kill chains, perfect dodges, mastery, focus, enemy traits, and collected gems. The between-wave upgrade draft can be dismissed, and the expansion remains compatible with the existing mouse, keyboard, and touch controls. These are client-side mechanics; they are not server-validated leaderboard protections.
+
 ### Music attribution and rights
 
 `Raya(Slowed).mp3` is credited to producer Zericxxn as a Brazilian Funk / Dark Phonk track (attribution supplied by the project maintainer). Its file metadata does not identify the creator, source, or license, so verify the source and permission terms before distributing the game. This third-party track is not covered by the project's MIT License, and attribution by itself does not grant permission to use copyrighted music. The prior `MATADORA (Sped Up).mp3` track is attributed to DJ Asul in its embedded metadata.
