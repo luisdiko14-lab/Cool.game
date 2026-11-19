@@ -1826,5 +1826,70 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installSentryTurret() {
+    function createDock() {
+      if (ultimateState.gadgetDock) return;
+      const dock = document.createElement('section');
+      dock.id = 'feature-gadget-dock';
+      dock.style.cssText = 'position:fixed;z-index:34;left:12px;top:calc(env(safe-area-inset-top,0px) + 112px);display:none;gap:6px;padding:7px;border:1px solid rgba(61,245,255,.35);border-radius:10px;background:rgba(7,10,28,.88);backdrop-filter:blur(8px);pointer-events:auto;';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.style.cssText = 'padding:9px 10px;border:1px solid rgba(61,245,255,.55);border-radius:7px;background:#130d2c;color:#dffcff;font:800 10px ui-monospace,monospace;';
+      button.textContent = 'SENTRY [G]';
+      button.addEventListener('click', deploy);
+      dock.append(button);
+      document.body.append(dock);
+      ultimateState.gadgetDock = dock;
+      ultimateState.gadgetButtons.sentry = button;
+    }
+    function deploy() {
+      if (Game.state !== 'play' || !Game.p || ultimateState.sentryCooldown > 0) return;
+      const p = Game.p;
+      ultimateState.sentry = { x: p.x, y: p.y, life: 11, fire: .25 };
+      ultimateState.sentryCooldown = 19;
+      FX.ring(p.x, p.y, 88, '#6dffb0');
+      FX.text(p.x, p.y - 48, 'SENTRY DEPLOYED · 11s', '#6dffb0', 15);
+    }
+    createDock();
+    const button = ultimateState.gadgetButtons.sentry;
+    const originalUpdate = Game.update;
+    Game.update = function(dt) {
+      originalUpdate.call(this, dt);
+      if (!ultimateState.gadgetDock) return;
+      const active = Game.state === 'play' && !!this.p && !this.p.dead;
+      ultimateState.gadgetDock.style.display = active ? 'flex' : 'none';
+      if (!active) return;
+      ultimateState.sentryCooldown = Math.max(0, ultimateState.sentryCooldown - dt);
+      button.disabled = ultimateState.sentryCooldown > 0;
+      button.textContent = ultimateState.sentryCooldown > 0 ? 'SENTRY '+Math.ceil(ultimateState.sentryCooldown)+'s' : 'SENTRY [G]';
+      const sentry = ultimateState.sentry;
+      if (!sentry) return;
+      sentry.life -= dt;
+      sentry.fire -= dt;
+      if (sentry.life <= 0) {
+        FX.ring(sentry.x, sentry.y, 105, '#6dffb0');
+        ultimateState.sentry = null;
+        return;
+      }
+      if (Math.random() < .22) FX.burst(sentry.x, sentry.y, '#6dffb0', 1, 16, .2, 2);
+      if (sentry.fire <= 0) {
+        const target = this.enemies.filter(enemy => !enemy.dead && enemy.hp > 0)
+          .sort((a,b)=>Math.hypot(a.x-sentry.x,a.y-sentry.y)-Math.hypot(b.x-sentry.x,b.y-sentry.y))[0];
+        if (target && Math.hypot(target.x-sentry.x,target.y-sentry.y) < 620) {
+          sentry.fire = .46;
+          this.damage(target, Math.max(12, 11 + this.lvl * 6));
+          FX.burst(target.x, target.y, '#6dffb0', 2, 65, .2, 2);
+        } else sentry.fire = .18;
+      }
+    };
+    window.addEventListener('keydown', event => {
+      if (Game.state === 'play' && event.code === 'KeyG' && !event.repeat) {
+        event.preventDefault();
+        deploy();
+      }
+    });
+  });
+
   init();
 })();
