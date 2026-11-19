@@ -1077,7 +1077,42 @@
 
     const originalUpdate = Game.update;
     Game.update = function(dt) {
+      if (Game.state === 'play' && this.p && !this.p.dead) {
+        const p = this.p;
+        for (const item of [...this.gems, ...this.pu]) {
+          if (!item || item.dead || (Number.isFinite(item.t) && item.t <= 0)) continue;
+          const dx = p.x - item.x, dy = p.y - item.y, distance = Math.hypot(dx, dy) || 1;
+          if (distance > 135 && distance < 270) {
+            const pull = Math.min(1, dt * 3.1);
+            item.x += dx / distance * 310 * pull * dt;
+            item.y += dy / distance * 310 * pull * dt;
+          }
+        }
+      }
       originalUpdate.call(this, dt);
+      if (Game.state === 'play' && this.p && !this.p.dead) {
+        novaCooldown = Math.max(0, novaCooldown - dt);
+        nearMissRewardClock = Math.max(0, nearMissRewardClock - dt);
+        killChainTimer = Math.max(0, killChainTimer - dt);
+        if (killChainTimer <= 0) killChain = 0;
+        for (const bullet of this.eb) {
+          if (bullet.life <= 0 || nearMissedBullets.has(bullet)) continue;
+          const distance = Math.hypot(bullet.x - this.p.x, bullet.y - this.p.y);
+          if (distance > 13 && distance < 38) {
+            nearMissedBullets.add(bullet);
+            if (nearMissRewardClock <= 0) {
+              this.awardScore(2);
+              nearMissRewardClock = .24;
+              FX.text(this.p.x, this.p.y - 24, 'NEAR MISS  +100', '#6dffb0', 13);
+            }
+          }
+        }
+        combatHudClock -= dt;
+        if (combatHudClock <= 0) {
+          combatHudClock = .12;
+          refreshCombatWidgets();
+        }
+      }
       if (Game.state === 'play' && runMode === 'timeattack') {
         this.modeClock = (this.modeClock || 0) + dt;
         const remaining = Math.max(0, 90 - this.modeClock);
