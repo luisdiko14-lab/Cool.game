@@ -1376,6 +1376,8 @@ def run_gui(host, start_port, gui_smoke_test=False):
                   const modeTab = document.querySelector('[data-feature-tab="modes"]');
                   if (!modeTab) return 'missing-modes-tab';
                   if (modeTab.getAttribute('aria-selected') !== 'true') return 'modes-tab-not-selected';
+                  if (!document.getElementById('desktop-update-button')) return 'missing-desktop-update-button';
+                  if (!window.pywebview || !window.pywebview.api || typeof window.pywebview.api.restart_demo !== 'function') return 'missing-update-restart-api';
                   return 'passed';
                 })()""")
               except Exception as error:
