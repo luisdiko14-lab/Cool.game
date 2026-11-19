@@ -2109,5 +2109,24 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installBossStagger() {
+    const originalDamage = Game.damage;
+    Game.damage = function(enemy, amount) {
+      if (enemy && enemy.k === 'boss' && !enemy.dead) {
+        enemy.featureStaggerDamage = (Number(enemy.featureStaggerDamage)||0) + Math.max(0,Number(amount)||0);
+        const threshold = Math.max(1200,(Number(enemy.mhp)||50000)*.075);
+        if (enemy.featureStaggerDamage >= threshold && (Number(this.time)||0) >= (Number(enemy.featureStaggerReadyAt)||0)) {
+          enemy.featureStaggerDamage = 0;
+          enemy.featureStaggerReadyAt = (Number(this.time)||0) + 6.5;
+          enemy.fireT = Math.max(Number(enemy.fireT)||0,1.25);
+          FX.ring(enemy.x,enemy.y,145,'#ffdf75');
+          FX.text(enemy.x,enemy.y-(enemy.r||40)-28,'BOSS STAGGERED · 1.25s','#ffdf75',15);
+        }
+      }
+      originalDamage.call(this,enemy,amount);
+    };
+  });
+
   init();
 })();
