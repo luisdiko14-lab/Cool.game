@@ -2174,5 +2174,61 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installEliteAffixes() {
+    const affixes=['BULWARK','VOLATILE','COMMANDER','MEDIC'];
+    const originalSpawn = Game.spawnWave;
+    Game.spawnWave = function() {
+      originalSpawn.call(this);
+      for(const elite of this.enemies.filter(enemy=>enemy.featureElite&&!enemy.featureAffix)){
+        const index=(Math.max(1,this.wave)-1)%affixes.length;
+        elite.featureAffix=affixes[index];
+        elite.featureAffixClock=2.8;
+        FX.text(elite.x,elite.y-(elite.r||18)-28,'ELITE · '+elite.featureAffix,'#ff9a55',13);
+      }
+    };
+    const originalDamage=Game.damage;
+    Game.damage=function(enemy,amount){
+      if(enemy&&enemy.featureAffix==='BULWARK'&&!enemy.dead) amount*=.76;
+      originalDamage.call(this,enemy,amount);
+    };
+    const originalKill=Game.kill;
+    Game.kill=function(enemy){
+      const volatile=enemy&&enemy.featureAffix==='VOLATILE';
+      const x=enemy&&enemy.x,y=enemy&&enemy.y;
+      originalKill.call(this,enemy);
+      if(volatile&&Number.isFinite(x)&&Number.isFinite(y)){
+        FX.ring(x,y,190,'#ff9a55');
+        for(const other of this.enemies) if(!other.dead&&Math.hypot(other.x-x,other.y-y)<190) this.damage(other,Math.max(20,25+this.lvl*8));
+        for(const bullet of this.eb) if(Math.hypot(bullet.x-x,bullet.y-y)<190) bullet.life=0;
+        FX.text(x,y-24,'VOLATILE BURST','#ff9a55',13);
+      }
+    };
+    const originalUpdate=Game.update;
+    Game.update=function(dt){
+      originalUpdate.call(this,dt);
+      if(Game.state!=='play') return;
+      for(const elite of this.enemies){
+        if(elite.dead||!elite.featureAffix) continue;
+        elite.featureAffixClock=(Number(elite.featureAffixClock)||0)-dt;
+        if(elite.featureAffix==='MEDIC'&&elite.featureAffixClock<=0){
+          elite.featureAffixClock=3.2;
+          const ally=this.enemies.filter(enemy=>enemy!==elite&&!enemy.dead&&enemy.hp<enemy.mhp)
+            .sort((a,b)=>a.hp/a.mhp-b.hp/b.mhp)[0];
+          if(ally){ally.hp=Math.min(ally.mhp,ally.hp+ally.mhp*.07);FX.ring(ally.x,ally.y,45,'#6dffb0')}
+        }
+        if(elite.featureAffix==='COMMANDER'&&elite.featureAffixClock<=0){
+          elite.featureAffixClock=3.4;
+          const p=this.p,angle=Math.atan2(p.y-elite.y,p.x-elite.x);
+          for(let i=-1;i<=1;i++){
+            const a=angle+i*.14;
+            this.eb.push({x:elite.x,y:elite.y,vx:Math.cos(a)*235,vy:Math.sin(a)*235,life:5,damage:13});
+          }
+          FX.text(elite.x,elite.y-22,'COMMAND BURST','#ff9a55',11);
+        }
+      }
+    };
+  });
+
   init();
 })();
