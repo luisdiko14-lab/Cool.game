@@ -1821,7 +1821,7 @@
           .sort((a, b) => Math.hypot(a.x-p.x,a.y-p.y)-Math.hypot(b.x-p.x,b.y-p.y))[0];
         if (target && Math.hypot(target.x-p.x,target.y-p.y) < Math.max(view.w,view.h)*.9) {
           ultimateState.droneClock = .72;
-          this.damage(target, Math.max(8, 10 + this.lvl * 5));
+          this.damage(target, Math.max(8, 10 + this.lvl * 5) * (Number(ultimateState.droneDamageMultiplier) || 1));
           FX.ring(x, y, 34, '#3df5ff');
           FX.burst(target.x, target.y, '#3df5ff', 3, 85, .24, 2);
         } else ultimateState.droneClock = .2;
@@ -2405,6 +2405,40 @@
   });
 
 
+  ultimateFeatureInstallers.push(function installWeaponMasteryMilestones() {
+    ultimateState.masteryKills={standard:0,scatter:0,rapid:0,lance:0};
+    const originalStart=Game.start;
+    Game.start=function(){ultimateState.masteryKills={standard:0,scatter:0,rapid:0,lance:0};originalStart.call(this)};
+    const originalKill=Game.kill;
+    Game.kill=function(enemy){
+      const weapon=WEAPONS[state.weapon]?state.weapon:'standard';
+      const before=ultimateState.masteryKills[weapon]||0;
+      originalKill.call(this,enemy);
+      const after=before+1;ultimateState.masteryKills[weapon]=after;
+      if(after>0&&after%25===0){
+        const reward=this.awardScore(350);
+        addFeatureCredits(30,'WEAPON MASTERY');
+        FX.text(core.getView().w/2,core.getView().h*.32,weapon.toUpperCase()+' MASTERY '+after+' · +'+reward,'#70e9ff',15);
+      }
+    };
+  });
+
+  ultimateFeatureInstallers.push(function installPersonalBestChallenge() {
+    const originalStart=Game.start;
+    Game.start=function(){ultimateState.previousBest=Math.max(Number(state.stats.bestScore)||0,Number(this.best)||0);ultimateState.bestChallengeClaimed=false;originalStart.call(this)};
+    const originalOver=Game.over;
+    Game.over=function(){
+      const score=Math.max(0,Number(this.score)||0);
+      originalOver.call(this);
+      if(!ultimateState.bestChallengeClaimed&&ultimateState.previousBest>0&&score>ultimateState.previousBest){
+        ultimateState.bestChallengeClaimed=true;
+        const reward=this.awardScore(1000);
+        addFeatureCredits(150,'PERSONAL BEST BROKEN');
+        FX.text(core.getView().w/2,core.getView().h*.27,'NEW PERSONAL BEST · +'+reward,'#ffc23d',20);
+      }
+    };
+  });
+
   ultimateFeatureInstallers.push(function installLevelUpPerkDraft() {
     const catalog=[
       {id:'rounds',name:'Overclocked Rounds',description:'Increase every hit by 8%.',kind:'attack'},
@@ -2420,14 +2454,15 @@
       {id:'credits',name:'Salvage License',description:'Receive 35 credits immediately.',kind:'economy'}
     ];
     ultimateState.perks=[];
+    ultimateState.synergies=[];
     ultimateState.damagePerkMultiplier=1;
     ultimateState.droneDamageMultiplier=1;
     ultimateState.scorePerkMultiplier=1;
     ultimateState.critBonus=0;
     ultimateState.magnetRadius=270;
     ultimateState.dashRechargeBonus=0;
-    ultimateState.rollPerkRarity=ultimateState.rollPerkRarity||(()=> 'FIELD');
-    ultimateState.perkPower=ultimateState.perkPower||{FIELD:1};
+    ultimateState.rollPerkRarity=()=>{const roll=Math.random();return roll<.07?'LEGENDARY':roll<.30?'RARE':'FIELD'};
+    ultimateState.perkPower={FIELD:1,RARE:1.55,LEGENDARY:2.25};
     const style=document.createElement('style');
     style.textContent='#ultimate-perk-overlay{position:fixed;inset:0;z-index:1100;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(3,5,18,.88);backdrop-filter:blur(12px)}#ultimate-perk-card{width:min(720px,96vw);padding:22px;border:1px solid rgba(61,245,255,.45);border-radius:16px;background:linear-gradient(145deg,#101a35,#17092c);color:#f4f8ff;box-shadow:0 18px 70px rgba(0,0,0,.6);text-align:center}#ultimate-perk-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:16px}#ultimate-perk-options button{min-height:140px;padding:14px;border:1px solid rgba(61,245,255,.35);border-radius:10px;background:rgba(17,8,43,.92);color:#f4f8ff;text-align:left}#ultimate-perk-options button strong,#ultimate-perk-options button small,#ultimate-perk-options button em{display:block}#ultimate-perk-options button small{margin-top:8px;color:#b2c5e4;line-height:1.4}#ultimate-perk-options button em{margin-top:12px;color:#3df5ff;font-size:10px;font-style:normal;font-weight:900}@media(max-width:600px){#ultimate-perk-card{padding:13px}#ultimate-perk-options{grid-template-columns:1fr;max-height:58vh;overflow:auto}#ultimate-perk-options button{min-height:78px}}';
     document.head.append(style);
@@ -2453,6 +2488,17 @@
       if(perk.id==='score') ultimateState.scorePerkMultiplier*=1+.08*power;
       if(perk.id==='credits') addFeatureCredits(Math.round(35*power),'SALVAGE LICENSE');
       FX.text(core.getView().w/2,core.getView().h*.23,rarity+' · '+perk.name,'#ffc23d',17);
+      const ids=new Set(ultimateState.perks.map(item=>item.id));
+      const combos=[
+        {id:'assault',needs:['rounds','critical'],label:'ASSAULT MATRIX',apply:()=>{ultimateState.damagePerkMultiplier*=1.12}},
+        {id:'guardian',needs:['vitality','shield'],label:'AEGIS PROTOCOL',apply:()=>{if(p)p.maxHp+=12}},
+        {id:'salvager',needs:['magnet','credits'],label:'SALVAGE NETWORK',apply:()=>addFeatureCredits(75,'PERK SYNERGY')},
+        {id:'overclock',needs:['rapid','dash'],label:'KINETIC OVERCLOCK',apply:()=>{if(p)p.dashCd=Math.max(0,p.dashCd-.6)}}
+      ];
+      for(const combo of combos) if(!ultimateState.synergies.includes(combo.id)&&combo.needs.every(id=>ids.has(id))){
+        ultimateState.synergies.push(combo.id);combo.apply();
+        FX.text(core.getView().w/2,core.getView().h*.29,combo.label+' UNLOCKED','#6dffb0',15);
+      }
       saveState();
     };
 
@@ -2494,6 +2540,7 @@
     const originalStart=Game.start;
     Game.start=function(){
       ultimateState.perks=[];
+      ultimateState.synergies=[];
       ultimateState.damagePerkMultiplier=1;
       ultimateState.droneDamageMultiplier=1;
       ultimateState.scorePerkMultiplier=1;
