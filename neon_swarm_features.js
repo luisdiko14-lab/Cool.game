@@ -128,6 +128,7 @@
   let combatHudClock = 0;
   let nearMissedBullets = new WeakSet();
   const featureClamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const clamp = featureClamp;
 
   function saveState() {
     try {
@@ -1083,9 +1084,10 @@
           if (!item || item.dead || (Number.isFinite(item.t) && item.t <= 0)) continue;
           const dx = p.x - item.x, dy = p.y - item.y, distance = Math.hypot(dx, dy) || 1;
           if (distance > 135 && distance < 270) {
-            const pull = Math.min(1, dt * 3.1);
-            item.x += dx / distance * 310 * pull * dt;
-            item.y += dy / distance * 310 * pull * dt;
+            const strength = featureClamp((270 - distance) / 135, 0, 1);
+            const speed = 210 + 150 * strength;
+            item.x += dx / distance * speed * dt;
+            item.y += dy / distance * speed * dt;
           }
         }
       }
