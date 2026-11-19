@@ -642,7 +642,7 @@
       button.id = 'desktop-update-button';
       button.className = 'alt';
       button.type = 'button';
-      button.textContent = 'Check for updates';
+      button.textContent = 'Check for updates (Demo)';
       button.title = 'Open the simulated update demo; no files are downloaded.';
       button.addEventListener('click', showDesktopUpdateDemo);
       menu.insertBefore(button, launch || menu.firstChild);
