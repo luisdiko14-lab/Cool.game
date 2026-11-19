@@ -336,7 +336,7 @@
             : state.mode === 'bullethell'
               ? 'Watch for extra incoming volleys from above.'
               : state.mode === 'hardcore'
-                ? '100,000 player HP. +10,000 damage on every wave. Waves 1–20: enemies have 25,000 HP. Wave 60 fires 30 orbs dealing 100 damage each every 2.4 seconds.'
+                ? '100,000 player HP. +10,000 damage on every wave. Every wave 1–20 has a boss; enemies and bosses have 25,000 HP. Wave 60 fires 30 orbs dealing 100 damage each every 2.4 seconds.'
                 : 'Select a mode, then launch it from here or the main menu.';
     const autopilotHost = document.getElementById('feature-autopilot');
     autopilotHost.replaceChildren();
@@ -793,6 +793,26 @@
         const view = core.getView();
         this.add('boss', view.w / 2, view.h * .2, 1000000);
         FX.text(view.w / 2, view.h * .34, `ENDLESS BOSS · WAVE ${this.wave}`, '#ff3df5', 26);
+        return;
+      }
+      if (runMode === 'hardcore' && this.wave >= 1 && this.wave <= 20) {
+        const view = core.getView();
+        originalSpawnWave.call(this);
+        let boss = this.enemies.find(enemy => !enemy.dead && enemy.k === 'boss');
+        if (!boss) {
+          this.add('boss', view.w / 2, view.h * .2, 25000);
+          boss = this.enemies[this.enemies.length - 1];
+        }
+        if (boss) {
+          boss.hp = 25000;
+          boss.mhp = 25000;
+          boss.r = Math.max(boss.r, 52);
+        }
+        if (this.p) {
+          this.p.maxHp = 100000;
+          this.p.hp = 100000;
+        }
+        FX.text(view.w / 2, view.h * .31, `HARDCORE BOSS · WAVE ${this.wave}`, '#ff3d5f', 24);
         return;
       }
       originalSpawnWave.call(this);
