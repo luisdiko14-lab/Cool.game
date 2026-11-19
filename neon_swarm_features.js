@@ -118,6 +118,16 @@
   let replayFrame = 0;
   let replayPlaying = false;
   let pilot2Element;
+  let combatWidgets = null;
+  let reviveUsed = false;
+  let killChain = 0;
+  let killChainTimer = 0;
+  let lastKillAt = -Infinity;
+  let novaCooldown = 0;
+  let nearMissRewardClock = 0;
+  let combatHudClock = 0;
+  let nearMissedBullets = new WeakSet();
+  const featureClamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
   function saveState() {
     try {
@@ -172,6 +182,13 @@
       #desktop-update-fill{height:100%;width:0;background:linear-gradient(90deg,#3df5ff,#79ffad);box-shadow:0 0 18px #3df5ff;transition:width .2s}
       #desktop-update-footer{display:flex;justify-content:space-between;align-items:center;color:#3df5ff;font-size:13px;font-weight:800}
       #desktop-update-card button{margin-top:18px}
+      #feature-combat-hud{position:fixed;z-index:20;left:12px;top:calc(env(safe-area-inset-top,0px) + 12px);display:none;min-width:150px;padding:9px 12px;border:1px solid rgba(61,245,255,.34);border-radius:9px;background:rgba(7,10,28,.82);box-shadow:0 4px 22px rgba(0,0,0,.3);color:#e9f8ff;font:700 11px/1.55 ui-monospace,monospace;pointer-events:none;backdrop-filter:blur(8px)}
+      #feature-boss-health{position:fixed;z-index:19;left:50%;top:calc(env(safe-area-inset-top,0px) + 12px);transform:translateX(-50%);display:none;width:min(390px,58vw);padding:8px 11px;border:1px solid rgba(255,61,154,.4);border-radius:9px;background:rgba(10,5,25,.88);pointer-events:none}
+      #feature-boss-health-label{display:flex;justify-content:space-between;gap:12px;margin-bottom:5px;color:#fff;font:800 10px/1.2 ui-monospace,monospace}
+      #feature-boss-health-track{height:8px;overflow:hidden;border-radius:8px;background:#34203e}
+      #feature-boss-health-fill{height:100%;width:100%;background:linear-gradient(90deg,#ff3d9a,#ff6b55);box-shadow:0 0 12px #ff3d9a;transition:width .12s}
+      #feature-nova-button{position:fixed;z-index:31;right:14px;bottom:calc(env(safe-area-inset-bottom,0px) + 76px);display:none;padding:11px 15px;border:1px solid rgba(255,194,61,.7);border-radius:10px;background:rgba(48,29,8,.92);color:#ffe4a0;font-weight:900;box-shadow:0 0 18px rgba(255,194,61,.18)}
+      #feature-nova-button:disabled{opacity:.65}
       @media(max-width:720px){.feature-tabs{max-width:94vw}.feature-content{max-height:58vh}.feature-choice{min-width:130px}}
     `;
     document.head.append(style);
