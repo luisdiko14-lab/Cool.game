@@ -875,6 +875,8 @@
   function useOverdrive() {
     if (Game.state !== 'play' || !Game.p || packTimers.overdrive > 0) return;
     packTimers.overdrive = packCooldowns.overdrive;
+    ultimateState.overdriveActive = 8;
+    ultimateState.heat = 0;
     Game.p.rapid = Math.max(Game.p.rapid, 8);
     FX.ring(Game.p.x, Game.p.y, 150, '#ffc23d');
     FX.text(Game.p.x, Game.p.y - 42, 'WEAPON OVERDRIVE · 8s', '#ffc23d', 17);
@@ -2064,6 +2066,46 @@
         }
       }
       originalDamage.call(this,enemy,amount);
+    };
+  });
+
+
+  ultimateFeatureInstallers.push(function installOverdriveHeat() {
+    const overdriveMarker = "    packTimers.overdrive = packCooldowns.overdrive;\n    Game.p.rapid";
+    if (typeof ultimateState.overdriveActive !== 'number') ultimateState.overdriveActive = 0;
+    if (typeof ultimateState.overheated !== 'number') ultimateState.overheated = 0;
+    if (typeof useOverdrive === 'function' && !ultimateState.overdrivePatched) {
+      const originalUseOverdrive = useOverdrive;
+      useOverdrive = function() {
+        originalUseOverdrive();
+        if (Game.state === 'play' && Game.p && packTimers.overdrive > 0) {
+          ultimateState.overdriveActive = 8;
+          ultimateState.heat = 0;
+        }
+      };
+      // Existing button references the original function, so patch its shared cooldown signal too.
+      if (overdriveMarker && !ultimateState.overdriveHotkeyReady) ultimateState.overdriveHotkeyReady = true;
+      ultimateState.overdrivePatched = true;
+    }
+    const originalUpdate = Game.update;
+    Game.update = function(dt) {
+      originalUpdate.call(this,dt);
+      if (Game.state !== 'play' || !this.p || this.p.dead) return;
+      if (ultimateState.overdriveActive > 0) {
+        ultimateState.overdriveActive = Math.max(0,ultimateState.overdriveActive-dt);
+        ultimateState.heat = Math.min(100,ultimateState.heat+dt*13);
+        if (ultimateState.heat >= 100) {
+          ultimateState.overdriveActive = 0;
+          ultimateState.overheated = 3.5;
+          this.p.rapid = 0;
+          FX.ring(this.p.x,this.p.y,180,'#ff5d4d');
+          FX.text(this.p.x,this.p.y-52,'OVERDRIVE OVERHEAT · COOLING 3.5s','#ff765f',13);
+        }
+      } else if (ultimateState.overheated > 0) {
+        ultimateState.overheated = Math.max(0,ultimateState.overheated-dt);
+      } else {
+        ultimateState.heat = Math.max(0,ultimateState.heat-dt*24);
+      }
     };
   });
 
