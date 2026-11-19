@@ -2128,5 +2128,24 @@
     };
   });
 
+
+  ultimateFeatureInstallers.push(function installBossTelegraphs() {
+    const originalUpdate = Game.update;
+    Game.update = function(dt) {
+      originalUpdate.call(this,dt);
+      if (Game.state!=='play') return;
+      for (const boss of this.enemies) {
+        if (boss.dead || boss.k!=='boss') continue;
+        if (boss.t < .22) ultimateState.bossTelegraph.delete(boss);
+        if (boss.t >= 1.95 && !ultimateState.bossTelegraph.has(boss)) {
+          ultimateState.bossTelegraph.add(boss);
+          FX.ring(boss.x,boss.y,210,'#ff718c');
+          FX.text(boss.x,boss.y-(boss.r||44)-28,'INCOMING AIMED VOLLEY','#ff9aac',13);
+          if (this.p) FX.text(this.p.x,this.p.y-70,'DODGE THE RED WARNING','#ff9aac',12);
+        }
+      }
+    };
+  });
+
   init();
 })();
