@@ -669,7 +669,101 @@
     attach();
   }
 
+
+  function createCombatWidgets() {
+    const hud = document.createElement('div');
+    hud.id = 'feature-combat-hud';
+    const wave = document.createElement('div');
+    const enemies = document.createElement('div');
+    const hp = document.createElement('div');
+    const score = document.createElement('div');
+    const streak = document.createElement('div');
+    hud.append(wave, enemies, hp, score, streak);
+    document.body.append(hud);
+
+    const boss = document.createElement('div');
+    boss.id = 'feature-boss-health';
+    const bossLabel = document.createElement('div');
+    bossLabel.id = 'feature-boss-health-label';
+    const bossName = document.createElement('span');
+    bossName.textContent = 'BOSS';
+    const bossValue = document.createElement('span');
+    bossLabel.append(bossName, bossValue);
+    const bossTrack = document.createElement('div');
+    bossTrack.id = 'feature-boss-health-track';
+    const bossFill = document.createElement('div');
+    bossFill.id = 'feature-boss-health-fill';
+    bossTrack.append(bossFill);
+    boss.append(bossLabel, bossTrack);
+    document.body.append(boss);
+
+    const nova = document.createElement('button');
+    nova.id = 'feature-nova-button';
+    nova.type = 'button';
+    nova.textContent = '✦ NOVA [E]';
+    nova.title = 'Clear enemy bullets and damage every enemy. Cooldown: 25 seconds.';
+    nova.addEventListener('click', activateNova);
+    document.body.append(nova);
+    combatWidgets = { hud, wave, enemies, hp, score, streak, boss, bossValue, bossFill, nova };
+  }
+
+  function activateNova() {
+    if (Game.state !== 'play' || !Game.p || novaCooldown > 0) return;
+    Game.blast(12, '#ffc23d');
+    novaCooldown = 25;
+    FX.text(Game.p.x, Game.p.y - 38, 'NOVA BURST!', '#ffc23d', 22);
+    refreshCombatWidgets();
+  }
+
+  function refreshCombatWidgets() {
+    if (!combatWidgets) return;
+    const active = Game.state === 'play' && !!Game.p && !Game.p.dead;
+    combatWidgets.hud.style.display = active ? 'block' : 'none';
+    combatWidgets.nova.style.display = active ? 'block' : 'none';
+    if (!active) {
+      combatWidgets.boss.style.display = 'none';
+      return;
+    }
+    const p = Game.p;
+    combatWidgets.wave.textContent = 'WAVE  ' + Game.wave + '  /  ' + MAX_WAVE;
+    combatWidgets.enemies.textContent = 'HOSTILES  ' + Game.enemies.filter(enemy => !enemy.dead).length;
+    combatWidgets.hp.textContent = 'HULL  ' + Math.ceil(p.hp).toLocaleString() + ' / ' + Math.ceil(p.maxHp).toLocaleString();
+    combatWidgets.score.textContent = 'SCORE  ' + Math.floor(Game.score || 0).toLocaleString() + '  ·  x' + (Game.mult || 1);
+    combatWidgets.streak.textContent = 'STREAK  ' + killChain + '  ·  NOVA  ' + (novaCooldown > 0 ? novaCooldown.toFixed(1) + 's' : 'READY');
+    const boss = Game.enemies.find(enemy => !enemy.dead && enemy.k === 'boss');
+    combatWidgets.boss.style.display = boss ? 'block' : 'none';
+    if (boss) {
+      const max = Math.max(1, Number(boss.mhp) || Number(boss.hp) || 1);
+      const hp = featureClamp((Number(boss.hp) || 0) / max * 100, 0, 100);
+      combatWidgets.bossValue.textContent = Math.max(0, Math.ceil(boss.hp)).toLocaleString() + ' / ' + max.toLocaleString();
+      combatWidgets.bossFill.style.width = hp + '%';
+    }
+    combatWidgets.nova.disabled = novaCooldown > 0;
+    combatWidgets.nova.textContent = novaCooldown > 0 ? '✦ NOVA · ' + Math.ceil(novaCooldown) + 's' : '✦ NOVA [E]';
+  }
+
+  function dashPulse() {
+    const p = Game.p;
+    if (!p) return;
+    let cleared = 0, hit = 0;
+    for (const bullet of Game.eb) {
+      if (bullet.life > 0 && Math.hypot(bullet.x - p.x, bullet.y - p.y) < 118) {
+        bullet.life = 0;
+        cleared++;
+      }
+    }
+    for (const enemy of Game.enemies) {
+      if (!enemy.dead && Math.hypot(enemy.x - p.x, enemy.y - p.y) < 92) {
+        Game.damage(enemy, 8);
+        hit++;
+      }
+    }
+    FX.ring(p.x, p.y, 230, '#3df5ff');
+    if (cleared || hit) FX.text(p.x, p.y - 30, 'DASH PULSE · ' + cleared + ' SHOTS / ' + hit + ' HITS', '#3df5ff', 13);
+  }
+
   function installHooks() {
+    createCombatWidgets();
     const autopilotButton = document.createElement('button');
     autopilotButton.type = 'button';
     autopilotButton.id = 'feature-autopilot-toggle';
