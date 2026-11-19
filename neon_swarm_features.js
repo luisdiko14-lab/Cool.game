@@ -1295,6 +1295,7 @@
       if (runMode === 'hardcore') amount += 10000;
       if (Math.random() < .12) {
         amount *= 2.5;
+        if (enemy && typeof enemy === 'object') enemy.featureCriticalSequence = (Number(enemy.featureCriticalSequence) || 0) + 1;
         if (enemy && Number.isFinite(enemy.x) && Number.isFinite(enemy.y)) FX.text(enemy.x, enemy.y - (enemy.r || 12) - 12, 'CRITICAL!', '#ffe36e', 15);
       }
       if (state.weapon === 'rapid') amount *= .8;
@@ -1988,6 +1989,27 @@
         this.damage(item.enemy, Math.max(10, 14 + this.lvl * 8));
         FX.ring(item.enemy.x, item.enemy.y, 34, '#70e9ff');
       }
+    };
+  });
+
+
+  ultimateFeatureInstallers.push(function installCombatLifesteal() {
+    const originalKill = Game.kill;
+    Game.kill = function(enemy) {
+      originalKill.call(this, enemy);
+      ultimateState.lifeStealClock = Math.max(0, ultimateState.lifeStealClock - 0);
+      if (!this.p || this.p.dead || this.p.hp <= 0 || ultimateState.lifeStealClock > 0) return;
+      const restored = Math.min(this.p.maxHp-this.p.hp, Math.max(1, Math.ceil(this.p.maxHp*.012)));
+      if (restored > 0) {
+        this.p.hp += restored;
+        ultimateState.lifeStealClock = .9;
+        FX.text(this.p.x, this.p.y-32, 'LIFESTEAL +'+restored, '#ff6eb4', 13);
+      }
+    };
+    const originalUpdate = Game.update;
+    Game.update = function(dt) {
+      originalUpdate.call(this, dt);
+      ultimateState.lifeStealClock = Math.max(0, ultimateState.lifeStealClock-dt);
     };
   });
 
