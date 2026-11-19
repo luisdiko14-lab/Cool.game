@@ -1378,6 +1378,28 @@ def run_gui(host, start_port, gui_smoke_test=False):
                   if (modeTab.getAttribute('aria-selected') !== 'true') return 'modes-tab-not-selected';
                   if (!document.getElementById('desktop-update-button')) return 'missing-desktop-update-button';
                   if (!window.pywebview || !window.pywebview.api || typeof window.pywebview.api.restart_demo !== 'function') return 'missing-update-restart-api';
+                  const hardcoreChoice = Array.from(document.querySelectorAll('#feature-modes button'))
+                    .find(button => button.textContent.includes('Hardcore'));
+                  if (!hardcoreChoice) return 'missing-hardcore-mode';
+                  hardcoreChoice.click();
+                  const launch = document.getElementById('feature-launch');
+                  if (!launch) return 'missing-hardcore-launch';
+                  launch.click();
+                  const game = window.NeonSwarmCore && window.NeonSwarmCore.Game;
+                  if (!game || !game.p) return 'hardcore-game-did-not-start';
+                  for (let wave = 1; wave <= 20; wave++) {
+                    game.wave = wave;
+                    game.enemies.length = 0;
+                    game.spawnWave();
+                    const bosses = game.enemies.filter(enemy => !enemy.dead && enemy.k === 'boss');
+                    if (!bosses.length) return 'hardcore-boss-missing-wave-' + wave;
+                    if (bosses.some(boss => boss.hp !== 25000 || boss.mhp !== 25000)) return 'hardcore-boss-hp-invalid-wave-' + wave;
+                    if (game.p.maxHp !== 100000 || game.p.hp !== 100000) return 'hardcore-player-hp-invalid-wave-' + wave;
+                  }
+                  const testBoss = game.enemies.find(enemy => enemy.k === 'boss' && !enemy.dead);
+                  const hpBefore = testBoss.hp;
+                  game.damage(testBoss, 1);
+                  if (hpBefore - testBoss.hp < 10001) return 'hardcore-damage-bonus-missing';
                   return 'passed';
                 })()""")
               except Exception as error:
