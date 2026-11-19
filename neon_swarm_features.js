@@ -78,7 +78,9 @@
         endlessBest: Number.isSafeInteger(saved.endlessBest) ? Math.max(0, saved.endlessBest) : 0,
         dailyScores: Object.fromEntries(Object.keys(dailyScores).sort().slice(-7).map(date => [date, dailyScores[date]])),
         mission: mission || makeMission(),
-        lastReplay: saved.lastReplay && Array.isArray(saved.lastReplay.samples) ? saved.lastReplay : null
+        lastReplay: saved.lastReplay && Array.isArray(saved.lastReplay.samples) ? saved.lastReplay : null,
+        stats: normalizeStats(saved.stats),
+        achievements: Array.isArray(saved.achievements) ? saved.achievements : []
       };
     } catch (_) {
       return {
