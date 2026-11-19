@@ -138,7 +138,7 @@
       if(S.noHit>=12){S.focus=Math.min(5,S.focus+dt);if(S.focus>0&&Math.random()<.035)FX.burst(p.x,p.y,'#7effd0',1,30,.2,2);}
       if(S.noHit>=8){S.repairClock+=dt;if(S.repairClock>=5){S.repairClock=0;p.hp=Math.min(p.maxHp,p.hp+Math.max(1,p.maxHp*.004));}}
       if(S.dodgeWindow>0)S.dodgeWindow=Math.max(0,S.dodgeWindow-dt);
-      if(Input.dash&&p.dashCd<=0)S.dodgeReady=.45;
+      if(p.dashT>0)S.dodgeReady=Math.max(S.dodgeReady,.16);
       if(S.dodgeReady>0){S.dodgeReady-=dt;for(const b of this.eb){if(b.life>0&&Math.hypot(b.x-p.x,b.y-p.y)<58){b.life=0;S.perfectDodges++;this.awardScore(250);text(p.x,p.y-30,'PERFECT DODGE +250','#7dfcff',13);FX.ring(p.x,p.y,78,'#7dfcff');}}}
       if(S.focus>=5&&p.rapid<1){p.rapid=Math.max(p.rapid,1.2);S.focus=0;text(p.x,p.y-35,'FOCUS OVERDRIVE','#7effd0',14);}
       if(S.survival>=60){S.survival=0;this.awardScore(500);addCredits(35,'SURVIVAL PAYOUT');}
