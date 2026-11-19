@@ -164,6 +164,14 @@
       body.access-large #pb{font-size:19px;min-height:44px}
       body.access-large .panel p,body.access-large .panel button{font-size:19px}
       body.access-calm *{scroll-behavior:auto!important}
+      #desktop-update-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px;background:rgba(3,4,16,.86);backdrop-filter:blur(12px);font-family:inherit}
+      #desktop-update-card{width:min(470px,94vw);padding:26px;border:1px solid rgba(61,245,255,.45);border-radius:16px;background:linear-gradient(145deg,#111a35,#130824);box-shadow:0 22px 90px rgba(0,0,0,.55),inset 0 0 28px rgba(61,245,255,.06);text-align:left}
+      #desktop-update-card h2{margin:0 0 8px;color:#f4eaff;font-size:22px}
+      #desktop-update-card p{color:#a592d6;font-size:12px}
+      #desktop-update-track{height:12px;margin:20px 0 9px;overflow:hidden;border-radius:10px;background:#202943}
+      #desktop-update-fill{height:100%;width:0;background:linear-gradient(90deg,#3df5ff,#79ffad);box-shadow:0 0 18px #3df5ff;transition:width .2s}
+      #desktop-update-footer{display:flex;justify-content:space-between;align-items:center;color:#3df5ff;font-size:13px;font-weight:800}
+      #desktop-update-card button{margin-top:18px}
       @media(max-width:720px){.feature-tabs{max-width:94vw}.feature-content{max-height:58vh}.feature-choice{min-width:130px}}
     `;
     document.head.append(style);
@@ -553,6 +561,95 @@
       pilot2Element.style.top = `${rect.top + Game.pilot2.y / view.h * rect.height}px`;
     }
     requestAnimationFrame(positionCoopPilot);
+  }
+
+  function showDesktopUpdateDemo() {
+    if (document.getElementById('desktop-update-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'desktop-update-overlay';
+    const card = document.createElement('section');
+    card.id = 'desktop-update-card';
+    const heading = document.createElement('h2');
+    heading.textContent = 'NEON SWARM · UPDATE CENTER';
+    const message = document.createElement('p');
+    message.textContent = 'Downloading new version… (simulated)';
+    const disclosure = document.createElement('p');
+    disclosure.textContent = 'DEMO ONLY — no files are downloaded or changed.';
+    const track = document.createElement('div');
+    track.id = 'desktop-update-track';
+    const fill = document.createElement('div');
+    fill.id = 'desktop-update-fill';
+    track.append(fill);
+    const footer = document.createElement('div');
+    footer.id = 'desktop-update-footer';
+    const status = document.createElement('span');
+    status.textContent = 'Preparing demo…';
+    const percent = document.createElement('strong');
+    percent.textContent = '0%';
+    footer.append(status, percent);
+    const close = document.createElement('button');
+    close.className = 'alt';
+    close.type = 'button';
+    close.textContent = 'Cancel demo';
+    card.append(heading, message, disclosure, track, footer, close);
+    overlay.append(card);
+    document.body.append(overlay);
+    let progress = 0, timer = null, finished = false;
+    const finish = () => {
+      finished = true;
+      if (timer) clearInterval(timer);
+      close.textContent = 'Close';
+    };
+    close.addEventListener('click', () => {
+      if (!finished && timer) clearInterval(timer);
+      overlay.remove();
+    });
+    timer = setInterval(() => {
+      progress = Math.min(100, progress + 1);
+      fill.style.width = progress + '%';
+      percent.textContent = progress + '%';
+      status.textContent = progress < 100 ? 'Downloading new version…' : 'Demo complete';
+      if (progress >= 100) {
+        finish();
+        message.textContent = 'Update demo completed.';
+        disclosure.textContent = 'No update package was downloaded. Restarting the desktop app…';
+        close.textContent = 'Restarting…';
+        close.disabled = true;
+        setTimeout(async () => {
+          try {
+            if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.restart_demo) {
+              throw new Error('Desktop restart bridge is unavailable.');
+            }
+            await window.pywebview.api.restart_demo();
+          } catch (error) {
+            disclosure.textContent = 'Demo finished, but automatic restart failed. Close and reopen Neon Swarm manually.';
+            status.textContent = 'Restart unavailable';
+            close.disabled = false;
+            close.textContent = 'Close';
+          }
+        }, 900);
+      }
+    }, 350);
+  }
+
+  function installDesktopUpdater() {
+    const attach = () => {
+      if (!window.pywebview || !window.pywebview.api) return;
+      const menu = document.getElementById('menu');
+      const launch = document.getElementById('play');
+      if (!menu || document.getElementById('desktop-update-button')) return;
+      const button = document.createElement('button');
+      button.id = 'desktop-update-button';
+      button.className = 'alt';
+      button.type = 'button';
+      button.textContent = 'Check for updates';
+      button.title = 'Open the simulated update demo; no files are downloaded.';
+      button.addEventListener('click', showDesktopUpdateDemo);
+      menu.insertBefore(button, launch || menu.firstChild);
+      console.info('[desktop] Update demo button installed.');
+    };
+    window.addEventListener('pywebviewready', attach);
+    attach();
   }
 
   function installHooks() {
@@ -981,6 +1078,7 @@
       drawReplay(true);
     };
     installHooks();
+    installDesktopUpdater();
     applyAccessibility();
     renderAll();
     requestAnimationFrame(positionCoopPilot);
