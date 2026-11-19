@@ -127,6 +127,18 @@
   let nearMissRewardClock = 0;
   let combatHudClock = 0;
   let nearMissedBullets = new WeakSet();
+  let hullRegenClock = 0;
+  let shieldRegenClock = 0;
+  let lastHurtAt = -Infinity;
+  let comboShieldReadyAt = 0;
+  let eliteWaveMarked = 0;
+  let milestoneWaveMarked = 0;
+  let bossEnraged = new WeakSet();
+  let lowHullWarned = false;
+  let threatHudClock = 0;
+  let nearbyThreatCount = 0;
+  let incomingBulletCount = 0;
+  let bonusGemCount = 0;
   const featureClamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const clamp = featureClamp;
 
@@ -679,7 +691,9 @@
     const hp = document.createElement('div');
     const score = document.createElement('div');
     const streak = document.createElement('div');
-    hud.append(wave, enemies, hp, score, streak);
+    const threat = document.createElement('div');
+    const warning = document.createElement('div');
+    hud.append(wave, enemies, hp, score, streak, threat, warning);
     document.body.append(hud);
 
     const boss = document.createElement('div');
@@ -705,7 +719,7 @@
     nova.title = 'Clear enemy bullets and damage every enemy. Cooldown: 25 seconds.';
     nova.addEventListener('click', activateNova);
     document.body.append(nova);
-    combatWidgets = { hud, wave, enemies, hp, score, streak, boss, bossValue, bossFill, nova };
+    combatWidgets = { hud, wave, enemies, hp, score, streak, threat, warning, boss, bossValue, bossFill, nova };
   }
 
   function activateNova() {
@@ -731,6 +745,9 @@
     combatWidgets.hp.textContent = 'HULL  ' + Math.ceil(p.hp).toLocaleString() + ' / ' + Math.ceil(p.maxHp).toLocaleString();
     combatWidgets.score.textContent = 'SCORE  ' + Math.floor(Game.score || 0).toLocaleString() + '  ·  x' + (Game.mult || 1);
     combatWidgets.streak.textContent = 'STREAK  ' + killChain + '  ·  NOVA  ' + (novaCooldown > 0 ? novaCooldown.toFixed(1) + 's' : 'READY');
+    combatWidgets.threat.textContent = 'THREAT  ' + nearbyThreatCount + ' NEAR  ·  ' + incomingBulletCount + ' TOTAL';
+    combatWidgets.warning.textContent = incomingBulletCount >= 15 ? '⚠ PROJECTILE STORM' : (p.hp <= p.maxHp * .25 ? '⚠ CRITICAL HULL' : '');
+    combatWidgets.warning.style.color = incomingBulletCount >= 15 || p.hp <= p.maxHp * .25 ? '#ff718c' : '#e9f8ff';
     const boss = Game.enemies.find(enemy => !enemy.dead && enemy.k === 'boss');
     combatWidgets.boss.style.display = boss ? 'block' : 'none';
     if (boss) {
@@ -819,6 +836,18 @@
       sampleClock = 0;
       runRecorded = false;
       reviveUsed = false;
+      hullRegenClock = 0;
+      shieldRegenClock = 0;
+      lastHurtAt = -Infinity;
+      comboShieldReadyAt = 0;
+      eliteWaveMarked = 0;
+      milestoneWaveMarked = 0;
+      bossEnraged = new WeakSet();
+      lowHullWarned = false;
+      threatHudClock = 0;
+      nearbyThreatCount = 0;
+      incomingBulletCount = 0;
+      bonusGemCount = 0;
       killChain = 0;
       killChainTimer = 0;
       lastKillAt = -Infinity;
@@ -940,11 +969,27 @@
         return;
       }
       originalSpawnWave.call(this);
+      if (runMode !== 'hardcore' && this.wave >= 4 && this.wave % 4 === 0 && eliteWaveMarked !== this.wave) {
+        const candidate = this.enemies.find(enemy => !enemy.dead && enemy.k !== 'boss');
+        if (candidate) {
+          candidate.hp = Math.ceil(candidate.hp * 1.8);
+          candidate.mhp = candidate.hp;
+          candidate.r = Math.ceil(candidate.r * 1.18);
+          candidate.featureElite = true;
+          eliteWaveMarked = this.wave;
+          FX.text(candidate.x, candidate.y - 24, 'ELITE TARGET', '#ff9a55', 17);
+        }
+      }
     };
 
     const originalClearWave = Game.clearWave;
     Game.clearWave = function() {
       originalClearWave.call(this);
+      if (this.wave > 0 && this.wave % 5 === 0 && milestoneWaveMarked !== this.wave) {
+        milestoneWaveMarked = this.wave;
+        const milestone = this.awardScore(100);
+        FX.text(core.getView().w / 2, core.getView().h * .42, 'MILESTONE WAVE  +' + milestone, '#ffc23d', 22);
+      }
       if (this.p && this.p.hp > 0 && this.p.hp < this.p.maxHp) {
         const repair = Math.max(10, Math.ceil(this.p.maxHp * .08));
         const restored = Math.min(repair, this.p.maxHp - this.p.hp);
@@ -980,6 +1025,24 @@
       killChainTimer = 3.2;
       checkAchievements();
       originalKill.call(this, enemy);
+      if (enemy && enemy.featureElite) {
+        const eliteBonus = this.awardScore(100);
+        FX.text(enemy.x, enemy.y - 48, 'ELITE BONUS  +' + eliteBonus, '#ff9a55', 15);
+      }
+      if (enemy && enemy.k === 'boss') {
+        const bossBonus = this.awardScore(200);
+        FX.text(enemy.x, enemy.y - 56, 'BOSS BOUNTY  +' + bossBonus, '#ffc23d', 18);
+      }
+      if (this.p && this.combo >= 15 && this.time >= comboShieldReadyAt) {
+        this.p.shield = Math.max(this.p.shield, 2.5);
+        comboShieldReadyAt = this.time + 30;
+        FX.ring(this.p.x, this.p.y, 125, '#3df5ff');
+        FX.text(this.p.x, this.p.y - 40, 'COMBO SHIELD!', '#3df5ff', 18);
+      }
+      if (this.p && this.p.dashCd > 0 && state.stats.kills % 10 === 0) {
+        this.p.dashCd = Math.max(0, this.p.dashCd - .35);
+        FX.text(this.p.x, this.p.y + 30, 'DASH RECHARGED', '#3df5ff', 12);
+      }
       if (killChain >= 5 && killChain % 5 === 0) {
         const bonus = 25 * Math.floor(killChain / 5);
         const earned = this.awardScore(bonus);
@@ -993,6 +1056,11 @@
       state.stats.gems++;
       checkAchievements();
       originalGem.call(this, gem);
+      bonusGemCount++;
+      if (bonusGemCount % 10 === 0) {
+        const jackpot = this.awardScore(100);
+        FX.text(gem.x, gem.y - 25, 'GEM JACKPOT  +' + jackpot, '#6dffb0', 16);
+      }
     };
 
     const originalHurt = Game.hurt;
@@ -1001,11 +1069,13 @@
       if (runMode === 'daily' && state.mode === 'daily') amount = (amount || 5) * dailyRule(runDate).damage;
       const player = this.p;
       originalHurt.call(this, amount);
+      lastHurtAt = Number(this.time) || 0;
       if (player && player.hp <= 0 && !reviveUsed) {
         reviveUsed = true;
         player.hp = Math.max(1, Math.ceil(player.maxHp * .35));
         player.dead = false;
         player.inv = 3;
+        player.shield = Math.max(player.shield, 4);
         this.timeScale = 1;
         this.dieT = 0;
         this.eb.length = 0;
@@ -1017,6 +1087,18 @@
         killChain = 0;
       }
       if (state.accessibility === 'calm') FX.flash = 0;
+    };
+
+    const originalLevelUp = Game.levelUp;
+    Game.levelUp = function() {
+      originalLevelUp.call(this);
+      if (this.p && this.p.hp > 0) {
+        const restored = Math.min(this.p.maxHp - this.p.hp, Math.ceil(this.p.maxHp * .05));
+        if (restored > 0) {
+          this.p.hp += restored;
+          FX.text(this.p.x, this.p.y - 48, 'LEVEL-UP REPAIR  +' + restored, '#6dffb0', 15);
+        }
+      }
     };
 
     const originalAward = Game.awardScore;
@@ -1097,6 +1179,44 @@
         nearMissRewardClock = Math.max(0, nearMissRewardClock - dt);
         killChainTimer = Math.max(0, killChainTimer - dt);
         if (killChainTimer <= 0) killChain = 0;
+        const activeBoss = this.enemies.find(enemy => !enemy.dead && enemy.k === 'boss');
+        if (activeBoss && !bossEnraged.has(activeBoss) && activeBoss.hp <= activeBoss.mhp * .5) {
+          bossEnraged.add(activeBoss);
+          activeBoss.fireT = Math.min(activeBoss.fireT, .08);
+          for (let shot = 0; shot < 12; shot++) {
+            const angle = shot * Math.PI * 2 / 12;
+            this.eb.push({ x: activeBoss.x, y: activeBoss.y, vx: Math.cos(angle) * 245, vy: Math.sin(angle) * 245, life: 5, damage: 12 });
+          }
+          FX.ring(activeBoss.x, activeBoss.y, 250, '#ff3d9a');
+          FX.text(activeBoss.x, activeBoss.y - 60, 'BOSS ENRAGED · PHASE 2', '#ff3d9a', 20);
+        }
+        hullRegenClock += dt;
+        if (hullRegenClock >= 4.5) {
+          hullRegenClock %= 4.5;
+          if (this.p.hp > 0 && this.p.hp < this.p.maxHp) {
+            const restored = Math.min(this.p.maxHp - this.p.hp, Math.max(1, Math.ceil(this.p.maxHp * .003)));
+            this.p.hp += restored;
+          }
+        }
+        if ((Number(this.time) || 0) - lastHurtAt >= 18 && this.p.shield <= 0) {
+          shieldRegenClock += dt;
+          if (shieldRegenClock >= 25) {
+            shieldRegenClock = 0;
+            this.p.shield = 2.5;
+            FX.ring(this.p.x, this.p.y, 90, '#3df5ff');
+            FX.text(this.p.x, this.p.y - 34, 'SHIELD RECHARGED', '#3df5ff', 14);
+          }
+        } else shieldRegenClock = 0;
+        if (!lowHullWarned && this.p.hp > 0 && this.p.hp <= this.p.maxHp * .25) {
+          lowHullWarned = true;
+          FX.text(this.p.x, this.p.y - 56, 'WARNING · HULL CRITICAL', '#ff718c', 18);
+        } else if (this.p.hp > this.p.maxHp * .35) lowHullWarned = false;
+        threatHudClock -= dt;
+        if (threatHudClock <= 0) {
+          threatHudClock = .2;
+          incomingBulletCount = this.eb.filter(bullet => bullet.life > 0).length;
+          nearbyThreatCount = this.eb.filter(bullet => bullet.life > 0 && Math.hypot(bullet.x - this.p.x, bullet.y - this.p.y) < 140).length;
+        }
         for (const bullet of this.eb) {
           if (bullet.life <= 0 || nearMissedBullets.has(bullet)) continue;
           const distance = Math.hypot(bullet.x - this.p.x, bullet.y - this.p.y);
@@ -1299,6 +1419,20 @@
     requestAnimationFrame(positionCoopPilot);
     window.addEventListener('keydown', event => {
       if (Game.state === 'features' && event.code === 'Escape') Game.set(state.returnTo);
+      if (event.code === 'KeyP' && !event.repeat) {
+        if (Game.state === 'play') Game.pause();
+        else if (Game.state === 'pause') Game.resume();
+      }
+      if (Game.state === 'play' && event.code === 'KeyA' && !event.repeat) {
+        state.autopilot = !state.autopilot;
+        saveState();
+        FX.text(Game.p.x, Game.p.y - 55, state.autopilot ? 'AUTOPILOT ENABLED' : 'AUTOPILOT DISABLED', '#3df5ff', 14);
+        const button = document.getElementById('feature-autopilot-toggle');
+        if (button) {
+          button.textContent = state.autopilot ? '✦ AUTOPILOT ON' : '✦ AUTOPILOT OFF';
+          button.style.borderColor = state.autopilot ? '#6dffb0' : 'rgba(61,245,255,.45)';
+        }
+      }
       if (Game.state === 'play' && event.code === 'KeyE' && !event.repeat) {
         event.preventDefault();
         activateNova();
