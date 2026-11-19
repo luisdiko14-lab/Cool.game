@@ -1944,5 +1944,28 @@
     });
   });
 
+
+  ultimateFeatureInstallers.push(function installCriticalChainLightning() {
+    const originalDamage = Game.damage;
+    Game.damage = function(enemy, amount) {
+      const previous = enemy && Number(enemy.featureCriticalSequence || 0);
+      originalDamage.call(this, enemy, amount);
+      const current = enemy && Number(enemy.featureCriticalSequence || 0);
+      if (!enemy || current <= previous || ultimateState.chainGuard) return;
+      const target = this.enemies.filter(other => other !== enemy && !other.dead && other.hp > 0)
+        .map(other => ({ other, distance: Math.hypot(other.x-enemy.x,other.y-enemy.y) }))
+        .filter(item => item.distance < 230)
+        .sort((a,b)=>a.distance-b.distance)[0];
+      if (!target) return;
+      ultimateState.chainGuard = true;
+      try {
+        FX.ring(enemy.x, enemy.y, 72, '#b58cff');
+        FX.burst(target.other.x, target.other.y, '#b58cff', 5, 95, .28, 2.5);
+        FX.text(target.other.x, target.other.y - 28, 'CHAIN LIGHTNING', '#b58cff', 12);
+        this.damage(target.other, Math.max(5, (Number(amount) || 0) * .42));
+      } finally { ultimateState.chainGuard = false; }
+    };
+  });
+
   init();
 })();
