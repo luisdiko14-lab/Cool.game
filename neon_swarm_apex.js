@@ -82,12 +82,15 @@
 
     const hud = document.createElement('div');
     hud.id = 'apex-hud';
+    hud.style.display = 'none';
     hud.innerHTML = '<strong>APEX PROTOCOL</strong><div id="apex-event">SECTOR STABLE</div><div id="apex-objective" class="apex-muted">Objective loading</div><div id="apex-relics" class="apex-muted">Relics: none</div><div id="apex-boss" class="apex-muted"></div>';
     document.body.append(hud);
 
     const pulse = document.createElement('button');
     pulse.id = 'apex-pulse';
     pulse.type = 'button';
+    pulse.style.display = 'none';
+    pulse.disabled = true;
     pulse.textContent = 'G · RIFT PULSE';
     pulse.addEventListener('click', activatePulse);
     document.body.append(pulse);
@@ -329,6 +332,8 @@
     S.eventPulse = 0;
     S.live = true;
     S.lastBanner = '';
+    if (S.hud) S.hud.style.display = 'block';
+    if (S.pulseButton) S.pulseButton.style.display = 'block';
     if (S.overlay) S.overlay.style.display = 'none';
     oldStart.call(this);
     installUI();
@@ -484,6 +489,29 @@
     }
     if (wave > 0 && wave % 5 === 0 && wave < MAX_WAVE) openRelicDraft();
     updateHud();
+  };
+
+  function hideApexUI() {
+    S.live = false;
+    S.relicDraftOpen = false;
+    if (S.hud) S.hud.style.display = 'none';
+    if (S.pulseButton) {
+      S.pulseButton.disabled = true;
+      S.pulseButton.style.display = 'none';
+    }
+    if (S.overlay) S.overlay.style.display = 'none';
+  }
+
+  const oldOver = Game.over;
+  Game.over = function () {
+    oldOver.call(this);
+    hideApexUI();
+  };
+
+  const oldGoMenu = Game.goMenu;
+  Game.goMenu = function () {
+    oldGoMenu.call(this);
+    hideApexUI();
   };
 
   const oldUpdate = Game.update;
