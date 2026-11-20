@@ -47,6 +47,33 @@ The separately loaded `neon_swarm_expansion.js` adds another layer of run mechan
 
 The expansion HUD reports bounty status, kill chains, perfect dodges, mastery, focus, enemy traits, and collected gems. The between-wave upgrade draft can be dismissed, and the expansion remains compatible with the existing mouse, keyboard, and touch controls. These are client-side mechanics; they are not server-validated leaderboard protections.
 
+### Apex update: 20 additional game systems
+
+The standalone browser build and Python-hosted game now load `neon_swarm_apex.js`, an optional extension layer that runs after the original engine and existing feature packs. It adds 20 systems:
+
+1. Rotating sector anomalies across selected waves.
+2. Gravity Rift fields that bend nearby enemy movement and hostile shots.
+3. Meteor warnings followed by aimed fragment volleys.
+4. Solar Flare events with sweeping projectile fans.
+5. Salvage Rush events that seed extra collectible crystals.
+6. A rotating optional contract for each wave.
+7. Rapid Response contracts with fast-clear rewards.
+8. Untouched Hull contracts for taking no hull damage.
+9. Crystal Survey contracts for collecting three crystals.
+10. Threat Sweep contracts for defeating enough enemies.
+11. Boss armor plating that must be broken before the core takes damage.
+12. Boss phase transitions at 75%, 50%, and 25% health.
+13. Core-exposure windows that reward aggressive damage timing.
+14. Phase-break radial shockwave volleys.
+15. Additional boss reinforcements during later phases.
+16. A selectable run-only relic cache after every fifth cleared wave.
+17. Ten stackable relics covering damage, defense, dash, crystals, chain damage, repairs, credits, and critical-style echo hits.
+18. Cross-relic synergies for collecting varied relic types.
+19. **Rift Pulse** on **G** or its on-screen button: clears hostile shots, grants a short shield, and delays nearby enemies' next attacks.
+20. Supply caches every six waves, granting a random hull repair, shield, or rapid-fire reward plus credits.
+
+A live Apex HUD tracks the current sector event, contract, relic inventory, boss armor, and Rift Pulse cooldown. Relics reset when a new run starts; they do not permanently alter the saved profile. The new module is loaded by `Neon Swarm.html` and is also inlined by `neon_swarm.py` when serving the hosted game, so both launch paths use the same systems. These remain client-side arcade mechanics and do not make leaderboard submissions tamper-proof.
+
 ### Music attribution and rights
 
 `Raya(Slowed).mp3` is credited to producer Zericxxn as a Brazilian Funk / Dark Phonk track (attribution supplied by the project maintainer). Its file metadata does not identify the creator, source, or license, so verify the source and permission terms before distributing the game. This third-party track is not covered by the project's MIT License, and attribution by itself does not grant permission to use copyrighted music. The prior `MATADORA (Sped Up).mp3` track is attributed to DJ Asul in its embedded metadata.
