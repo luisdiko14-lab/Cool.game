@@ -323,6 +323,10 @@
     S.relicDraftOpen = false;
     S.chainLock = false;
     S.runClock = 0;
+    S.bossPatternClock = 0;
+    S.hudClock = 0;
+    S.eventClock = 0;
+    S.eventPulse = 0;
     S.live = true;
     S.lastBanner = '';
     if (S.overlay) S.overlay.style.display = 'none';
@@ -485,18 +489,25 @@
   const oldUpdate = Game.update;
   Game.update = function (dt) {
     const bullets = this.eb ? this.eb.slice() : [];
+    const slowed = [];
+    const chronoScale = .84;
     if (count('chrono') && this.p) {
       const v = view(), radius = Math.min(v.w, v.h) * .42;
       for (const bullet of bullets) {
         if (!bullet || bullet.life <= 0) continue;
         const d = Math.hypot(bullet.x - this.p.x, bullet.y - this.p.y);
         if (d < radius) {
-          bullet.vx *= .78;
-          bullet.vy *= .78;
+          bullet.vx *= chronoScale;
+          bullet.vy *= chronoScale;
+          slowed.push(bullet);
         }
       }
     }
     oldUpdate.call(this, dt);
+    for (const bullet of slowed) {
+      bullet.vx /= chronoScale;
+      bullet.vy /= chronoScale;
+    }
     if (this.state !== 'play' || !this.p || this.p.dead) {
       updateHud();
       return;
