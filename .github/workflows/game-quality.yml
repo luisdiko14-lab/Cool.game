@@ -1,0 +1,78 @@
+name: Neon Swarm quality checks
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "Neon Swarm.html"
+      - "neon_swarm.py"
+      - "auth.py"
+      - "neon_swarm_*.js"
+      - "requirements.txt"
+      - "test_auth.py"
+      - ".github/workflows/game-quality.yml"
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neon-swarm-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate game modules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Python test dependency
+        run: python -m pip install -r requirements.txt
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check neon_swarm_features.js
+          node --check neon_swarm_expansion.js
+          node --check neon_swarm_apex.js
+
+      - name: Compile Python modules
+        run: python -m py_compile neon_swarm.py auth.py
+
+      - name: Run authentication tests
+        run: python -m unittest -v test_auth
+
+      - name: Verify game extension wiring
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          standalone = Path("Neon Swarm.html").read_text(encoding="utf-8")
+          server = Path("neon_swarm.py").read_text(encoding="utf-8")
+          modules = (
+              "neon_swarm_features.js",
+              "neon_swarm_expansion.js",
+              "neon_swarm_apex.js",
+          )
+          positions = [standalone.find(f'<script src="{name}"></script>') for name in modules]
+          assert all(position >= 0 for position in positions), "A standalone extension script is missing"
+          assert positions == sorted(positions), "Standalone scripts are not loaded in dependency order"
+          assert all(name in server for name in modules), "The Python server is missing an extension module"
+          assert 'inline_scripts = "\\n".join' in server, "The Python server is not inlining extension modules"
+          print("Standalone and Python-hosted extension wiring looks good.")
+          PY
