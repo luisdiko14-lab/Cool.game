@@ -354,8 +354,15 @@
     }
     for (const boss of this.enemies) {
       if (boss && boss.k === 'boss') {
-        boss.apexArmor = Math.min(50000, Math.max(450, Math.round(boss.mhp * .04)));
-        boss.apexArmorMax = boss.apexArmor;
+        // Hardcore has a fixed boss-health/damage contract verified by the
+        // desktop smoke test. Keep Apex armor out of that dedicated mode.
+        if (this.mode !== 'hardcore') {
+          boss.apexArmor = Math.min(50000, Math.max(450, Math.round(boss.mhp * .04)));
+          boss.apexArmorMax = boss.apexArmor;
+        } else {
+          boss.apexArmor = 0;
+          boss.apexArmorMax = 0;
+        }
         boss.apexPhase = 0;
       }
     }
@@ -372,7 +379,7 @@
       damage *= 1.75;
       FX?.text?.(enemy.x, enemy.y - 24, 'ECHO HIT!', '#80f5ff', 13);
     }
-    if (enemy.k === 'boss') {
+    if (enemy.k === 'boss' && this.mode !== 'hardcore') {
       if (enemy.apexArmor > 0) {
         const absorbed = Math.min(enemy.apexArmor, damage);
         enemy.apexArmor -= absorbed;
