@@ -1017,21 +1017,25 @@ class Handler(BaseHTTPRequestHandler):
             return self.auth_status()
         if path in ("/", "/index.html"):
           try:
-            feature_path = Path(__file__).resolve().with_name("neon_swarm_features.js")
-            feature_script = feature_path.read_text(encoding="utf-8")
+            scripts = []
+            for filename in ("neon_swarm_features.js", "neon_swarm_expansion.js", "neon_swarm_apex.js"):
+              script_path = Path(__file__).resolve().with_name(filename)
+              scripts.append(script_path.read_text(encoding="utf-8"))
           except OSError:
-            return self.send_body(500, '{"error":"game features are unavailable"}')
+            return self.send_body(500, '{"error":"one or more game feature modules are unavailable"}')
           feature_tag = '<script src="/neon_swarm_features.js"></script>'
           if feature_tag not in GAME_HTML:
             return self.send_body(500, '{"error":"game feature hook is missing"}')
-          html = GAME_HTML.replace(feature_tag, "<script>\n" + feature_script + "\n</script>")
+          inline_scripts = "\n".join("<script>\n" + script + "\n</script>" for script in scripts)
+          html = GAME_HTML.replace(feature_tag, inline_scripts)
           return self.send_body(200, html, "text/html")
-        if path == "/neon_swarm_features.js":
+        if path in ("/neon_swarm_features.js", "/neon_swarm_expansion.js", "/neon_swarm_apex.js"):
           try:
-            features = Path(__file__).resolve().with_name("neon_swarm_features.js").read_text(encoding="utf-8")
-            return self.send_body(200, features, "application/javascript")
+            filename = path.rsplit("/", 1)[-1]
+            script = Path(__file__).resolve().with_name(filename).read_text(encoding="utf-8")
+            return self.send_body(200, script, "application/javascript")
           except OSError:
-            return self.send_body(404, "// game features unavailable", "application/javascript")
+            return self.send_body(404, "// game feature module unavailable", "application/javascript")
         if path == "/api/scores":
           return self.send_body(200, json.dumps({"scores": load_scores()}))
         if path == "/api/saves":
