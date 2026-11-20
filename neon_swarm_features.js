@@ -2247,7 +2247,12 @@
       ultimateState.waveMutator=rule;
       for(const enemy of this.enemies){
         if(enemy.dead) continue;
-        if(rule.health!==1){enemy.hp=Math.max(1,Math.ceil(enemy.hp*rule.health));enemy.mhp=Math.max(enemy.hp,Math.ceil(enemy.mhp*rule.health))}
+        // Hardcore bosses have a fixed 25,000 HP contract; wave mutators
+        // may tune regular enemies but must never alter the boss health check.
+        if(rule.health!==1 && !(runMode==='hardcore' && enemy.k==='boss')){
+          enemy.hp=Math.max(1,Math.ceil(enemy.hp*rule.health));
+          enemy.mhp=Math.max(enemy.hp,Math.ceil(enemy.mhp*rule.health));
+        }
         if(rule.fire!==1) enemy.fireT=Math.max(.12,(Number(enemy.fireT)||1)*rule.fire);
       }
       if(rule.name==='SUPPLY RUSH'&&this.pu){
