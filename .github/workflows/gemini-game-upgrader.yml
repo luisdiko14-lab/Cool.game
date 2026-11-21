@@ -125,6 +125,8 @@ jobs:
           - Never turn the main game into a shop-only page, racing demo, mockup, or alternate
             mini-game. New modes must be optional and must not replace the core game.
           - A feature is not complete unless its controls work and it is connected to gameplay.
+          - A meaningful requested UX/gameplay refinement may modify existing UI or behavior
+            without adding a new HTML ID or named function; preserve surrounding systems.
 
           Implement 1-3 real, cohesive gameplay improvements with polished visual/audio feedback
           and sensible balance. Avoid placeholder features, fake buttons, TODOs, stubs,
@@ -363,10 +365,14 @@ jobs:
 
                   added_ids = sorted(generated_ids - baseline_ids)
                   added_functions = sorted(generated_functions - baseline_functions)
-                  if not added_ids and not added_functions:
+
+                  # Refinements can improve existing UI/behavior without adding a
+                  # new ID or function (for example, reducing popup frequency).
+                  # Existing IDs/functions and the deletion budget above stay strict.
+                  if body == baseline_html:
                       raise SystemExit(
-                          "FEATURE-PRESERVATION BLOCK: no new UI elements or named "
-                          "game functions were detected; refusing a non-feature update."
+                          "FEATURE-PRESERVATION BLOCK: Gemini returned the unchanged "
+                          "baseline game; no gameplay or UI improvement was made."
                       )
 
                   print(
@@ -374,7 +380,8 @@ jobs:
                       f"{len(baseline_ids)} existing IDs retained, "
                       f"{len(baseline_functions)} existing functions retained, "
                       f"{len(added_ids)} new IDs and "
-                      f"{len(added_functions)} new named functions."
+                      f"{len(added_functions)} new named functions; "
+                      "existing-feature refinements are allowed."
                   )
 
               if path.exists() and path.read_text(encoding="utf-8") == body:
