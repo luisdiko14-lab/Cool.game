@@ -404,8 +404,9 @@ const Game={state:'menu',time:0,best:0,p:null,
     if(e.k==='boss'||Math.random()<.07)this.pu.push({x:e.x,y:e.y,k:e.k==='boss'?'life':['shield','bomb','life','rapid'][Math.floor(rnd(0,4))],t:12,a:0})},
   gem(g){this.totalXp++;this.xp++;this.refreshMultiplier();this.awardScore(5*this.mult);Sfx.play('gem',this.combo);FX.burst(g.x,g.y,COL.mint,4,120,.3,2);
     if(this.xp>=this.need){this.xp=0;this.need+=4;this.levelUp()}},
-  levelUp(){const p=this.p;
-    if(this.lvl<5){this.lvl++;FX.text(p.x,p.y-30,'Weapon up!',COL.gold,22)}else{const bonus=this.awardScore(200*this.mult);FX.text(p.x,p.y-30,'+'+bonus,COL.gold,22)}
+  levelUp(){
+    if(this.lvl<5)this.lvl++;
+    else this.awardScore(200*this.mult);
     this.blast(2,COL.gold);Sfx.play('up');
     
     },
