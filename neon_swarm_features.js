@@ -1279,10 +1279,7 @@
       originalLevelUp.call(this);
       if (this.p && this.p.hp > 0) {
         const restored = Math.min(this.p.maxHp - this.p.hp, Math.ceil(this.p.maxHp * .05));
-        if (restored > 0) {
-          this.p.hp += restored;
-          FX.text(this.p.x, this.p.y - 48, 'LEVEL-UP REPAIR  +' + restored, '#6dffb0', 15);
-        }
+        if (restored > 0) this.p.hp += restored;
       }
     };
 
@@ -2473,7 +2470,7 @@
     document.head.append(style);
     const overlay=document.createElement('div');
     overlay.id='ultimate-perk-overlay';
-    overlay.innerHTML='<section id="ultimate-perk-card"><h2>LEVEL UP · CHOOSE A PERK</h2><p id="ultimate-perk-subtitle">Select one upgrade to shape this run.</p><div id="ultimate-perk-options"></div></section>';
+    overlay.innerHTML='<section id="ultimate-perk-card"><h2>WAVE MILESTONE · CHOOSE A PERK</h2><p id="ultimate-perk-subtitle">Every 10 waves, choose one upgrade to shape this run.</p><div id="ultimate-perk-options"></div></section>';
     document.body.append(overlay);
     ultimateState.perkOverlay=overlay;
 
@@ -2554,13 +2551,18 @@
       ultimateState.dashRechargeBonus=0;
       ultimateState.perkQueue=0;
       ultimateState.perkDraftOpen=false;
+      ultimateState.lastPerkWave=0;
       overlay.style.display='none';
       originalStart.call(this);
     };
-    const originalLevelUp=Game.levelUp;
-    Game.levelUp=function(){
-      originalLevelUp.call(this);
-      ultimateState.queuePerkDraft();
+    const originalSpawnWave=Game.spawnWave;
+    Game.spawnWave=function(){
+      originalSpawnWave.call(this);
+      const wave=Number(this.wave)||0;
+      if(wave>0&&wave%10===0&&ultimateState.lastPerkWave!==wave){
+        ultimateState.lastPerkWave=wave;
+        ultimateState.queuePerkDraft();
+      }
     };
     const originalDamage=Game.damage;
     Game.damage=function(enemy,amount){
