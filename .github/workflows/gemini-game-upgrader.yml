@@ -96,12 +96,15 @@ jobs:
               raise SystemExit("Neon Swarm.html was not found; refusing to guess the game structure.")
 
           context = []
-          budget = 180_000
+          # Stay within the 8,000 TPM on-demand limit. Send compact source
+          # excerpts and ask for a small unified diff, not whole game files.
+          budget = 10_000
+          per_file_budget = 3_500
           for name, body in source_files:
               if budget <= 0:
                   break
-              chunk = body[:min(len(body), budget)]
-              context.append(f"\n===== FILE: {name} =====\n{chunk}")
+              chunk = body[:min(len(body), per_file_budget, budget)]
+              context.append(f"\\n===== FILE: {name} (source excerpt) =====\\n{chunk}")
               budget -= len(chunk)
 
           system = """
@@ -131,8 +134,13 @@ jobs:
           rewrites. Keep save data backward-compatible and retain existing controls.
 
           Return exactly one JSON object:
-          {"summary":"...","files":[{"path":"relative/path","content":"complete UTF-8 file content"}]}.
-          Include complete contents for every changed or newly created file, not diffs.
+          {"summary":"...","patch":"standard unified git diff"}.
+          Return a SMALL, precise unified diff only; never return complete files.
+          Include proper diff headers (diff --git, --- and +++), with enough context
+          for git apply. Keep the patch under 20 KB. Do not modify unrelated code.
+          The supplied source is intentionally excerpted to fit the API token budget.
+          Only make changes that can be safely grounded in the shown code; prefer
+          additive code at known insertion points and do not invent unseen symbols.
           You may only create or modify Neon Swarm game files at repository root:
           Neon Swarm.html, neon_swarm.py, or files matching neon_swarm_*.js.
           Do not change auth.py, tests, workflows, dependencies, configuration or documentation.
@@ -213,7 +221,7 @@ jobs:
           payload = {
               "model": model,
               "temperature": 0.25,
-              "max_completion_tokens": 16000,
+              "max_completion_tokens": 3000,
               "response_format": {"type": "json_object"},
               "messages": [
                   {"role": "system", "content": system},
@@ -255,16 +263,53 @@ jobs:
               result = json.loads(response_text)
           except json.JSONDecodeError as exc:
               preview = response_text[max(0, exc.pos - 300):exc.pos + 300]
-              print("Malformed Llama JSON excerpt:")
+              print("Malformed model JSON excerpt:")
               print(preview)
               raise SystemExit("Model returned malformed JSON; no files were modified.") from exc
 
           if not isinstance(result, dict):
               raise SystemExit("Model returned an unexpected structured response type.")
           summary = str(result.get("summary", "")).strip()
-          files = result.get("files")
-          if not isinstance(files, list):
-              raise SystemExit("Model response did not contain a files array.")
+          patch = result.get("patch")
+          if not isinstance(patch, str) or not patch.strip():
+              raise SystemExit("Model response did not contain a unified diff patch.")
+          if len(patch.encode("utf-8")) > 20_000:
+              raise SystemExit("Generated patch exceeded the 20 KB safety limit.")
+
+          patch_file = Path("groq-upgrade.patch")
+          patch_file.write_text(patch, encoding="utf-8")
+          check = subprocess.run(
+              ["git", "apply", "--check", str(patch_file)],
+              text=True, capture_output=True,
+          )
+          if check.returncode:
+              raise SystemExit(
+                  "Generated patch did not apply cleanly; no game files were changed.\\n"
+                  + check.stderr[:3000]
+              )
+          subprocess.run(["git", "apply", str(patch_file)], check=True)
+          changed_names = subprocess.check_output(
+              ["git", "diff", "--name-only"], text=True
+          ).splitlines()
+          deleted_names = subprocess.check_output(
+              ["git", "diff", "--name-only", "--diff-filter=D"], text=True
+          ).splitlines()
+          if deleted_names:
+              raise SystemExit(
+                  "FEATURE-PRESERVATION BLOCK: patch attempted to delete files: "
+                  + ", ".join(deleted_names)
+              )
+          invalid_names = [name for name in changed_names if not allowed(name)]
+          if invalid_names:
+              raise SystemExit(
+                  "Rejected patch touching disallowed paths: " + ", ".join(invalid_names)
+              )
+          files = [
+              {"path": name, "content": (root / name).read_text(encoding="utf-8")}
+              for name in changed_names
+          ]
+          if not files:
+              raise SystemExit("Model patch made no repository changes.")
 
           baseline_html = subprocess.check_output(
               ["git", "show", "origin/main:Neon Swarm.html"],
