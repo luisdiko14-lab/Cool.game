@@ -116,7 +116,7 @@ jobs:
               if budget <= 0:
                   break
               chunk = body[:min(len(body), per_file_budget, budget)]
-              context.append(f"\\n===== FILE: {name} (source excerpt) =====\\n{chunk}")
+              context.append(f"\n===== FILE: {name} (source excerpt) =====\n{chunk}")
               budget -= len(chunk)
 
           system = """
@@ -326,8 +326,8 @@ jobs:
                   converted_text = converted_text.strip()
                   # Strip optional fences and any leading commentary, but never
                   # synthesize or repair diff content locally.
-                  converted_text = re.sub(r"^\\s*```(?:diff)?\\s*\\n", "", converted_text, flags=re.IGNORECASE)
-                  converted_text = re.sub(r"\\n?```\\s*$", "", converted_text)
+                  converted_text = re.sub(r"^\s*```(?:diff)?\s*\n", "", converted_text, flags=re.IGNORECASE)
+                  converted_text = re.sub(r"\n?```\s*$", "", converted_text)
                   diff_start = converted_text.find("diff --git ")
                   if diff_start < 0:
                       raise ValueError("Converter did not return a diff --git header.")
@@ -403,13 +403,13 @@ jobs:
                   if not isinstance(repaired_patch, str) or not repaired_patch.strip():
                       raise ValueError("Patch repair returned an empty response.")
                   repaired_patch = repaired_patch.strip()
-                  repaired_patch = re.sub(r"^\\s*\x60\x60\x60(?:diff)?\\s*\\n", "", repaired_patch, flags=re.IGNORECASE)
-                  repaired_patch = re.sub(r"\\n?\x60\x60\x60\\s*$", "", repaired_patch)
+                  repaired_patch = re.sub(r"^\s*\x60\x60\x60(?:diff)?\s*\n", "", repaired_patch, flags=re.IGNORECASE)
+                  repaired_patch = re.sub(r"\n?\x60\x60\x60\s*$", "", repaired_patch)
                   match = re.search(r"(?m)^diff --git ", repaired_patch)
                   if not match:
                       raise ValueError("Repair response did not contain a diff header.")
                   patch = repaired_patch[match.start():].strip()
-                  if "\\n--- " not in patch or "\\n+++ " not in patch:
+                  if "\n--- " not in patch or "\n+++ " not in patch:
                       raise ValueError("Repaired patch is missing --- or +++ file headers.")
                   if len(patch.encode("utf-8")) > 20_000:
                       raise ValueError("Repaired patch exceeded the 20 KB safety limit.")
