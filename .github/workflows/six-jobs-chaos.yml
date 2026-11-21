@@ -20,7 +20,7 @@ jobs:
       - name: Throw an intentional error
         run: |
           echo "This job is supposed to fail."
-          exit 1
+          exit 2
 
   error-job-2:
     name: "Error Job 2 - Intentional Failure"
@@ -33,11 +33,11 @@ jobs:
 
   error-job-3:
     name: "Error Job 3 - Intentional Failure"
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - name: Throw an intentional error
         run: |
-          echo "This job is supposed to fail."
+          Write-Host "This job is supposed to fail."
           exit 1
 
   error-job-4:
@@ -94,7 +94,7 @@ jobs:
           set -euo pipefail
 
           packages=(
-            lodash axios chalk kleur picocolors dayjs date-fns uuid nanoid
+            lodash discord.js axios chalk kleur picocolors dayjs date-fns uuid nanoid
             zod joi express cors helmet morgan dotenv yaml js-yaml minimist
             yargs commander ora cli-table3 inquirer prompts fs-extra glob
             fast-glob chokidar micromatch semver debug ms pretty-ms p-limit
