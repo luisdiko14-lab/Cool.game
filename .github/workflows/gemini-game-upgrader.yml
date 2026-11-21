@@ -71,8 +71,6 @@ jobs:
           allowed_exact = {
               "Neon Swarm.html",
               "neon_swarm.py",
-              "auth.py",
-              "test_auth.py",
           }
 
           def allowed(path: str) -> bool:
@@ -209,7 +207,7 @@ jobs:
       - name: Stop if there are no game changes
         id: changes
         run: |
-          if git diff --quiet -- 'Neon Swarm.html' 'neon_swarm.py' 'neon_swarm_*.js'; then
+          if [ -z "$(git status --porcelain -- 'Neon Swarm.html' 'neon_swarm.py' 'neon_swarm_*.js')" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No game source changes to publish."
           else
