@@ -127,7 +127,8 @@
     Game.clearWave=function(){
       const completedWave=this.wave;
       oldClear.call(this);
-      if(completedWave>0&&completedWave%2===0)openDraft();
+      // Rotate this upgrade draft into the shared 10-wave cadence (waves 30, 60, 90...).
+      if(completedWave>0&&completedWave%30===0)openDraft();
       if(completedWave%5===0&&S.cacheWave!==completedWave){
         S.cacheWave=completedWave;
         const p=this.p;if(p)this.pu.push({x:p.x,y:Math.max(50,p.y-95),k:'life',t:25,a:0,nsxCache:true});
