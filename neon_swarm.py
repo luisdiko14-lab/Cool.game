@@ -1187,7 +1187,7 @@ def run_gui(host, start_port, gui_smoke_test=False):
     print("[startup] Neon Swarm desktop launcher starting.", flush=True)
     print(f"[startup] Game server listening at {url}", flush=True)
     print(f"[startup] Leaderboard file: {DB}", flush=True)
-    if host == "0.0.0.0":
+    if host == "0.0.0.0":  # nosec B104 -- only used after the user opts in with --lan
         ip = lan_ip()
         if ip:
             print(f"[startup] Local network link: http://{ip}:{port}", flush=True)
@@ -1441,7 +1441,7 @@ def run_gui(host, start_port, gui_smoke_test=False):
     def update_loading():
       elapsed = time.monotonic() - started_at
       try:
-        with urlopen(url, timeout=0.4) as response:
+        with urlopen(url, timeout=0.4) as response:  # nosec B310 -- url is the app-generated loopback HTTP health check
           ready = response.status == 200
       except (OSError, URLError):
         ready = False
@@ -1476,7 +1476,7 @@ def main():
     ap.add_argument("--server", action="store_true", help="run only the game server")
     args = ap.parse_args()
 
-    host = "0.0.0.0" if args.lan else "127.0.0.1"
+    host = "0.0.0.0" if args.lan else "127.0.0.1"  # nosec B104 -- LAN exposure requires explicit --lan opt-in
     is_executable = bool(getattr(sys, "frozen", False)) or Path(sys.argv[0]).suffix.lower() == ".exe"
     if not args.server and (args.gui or args.gui_smoke_test or is_executable):
         run_gui(host, args.port, args.gui_smoke_test)
