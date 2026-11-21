@@ -9,10 +9,10 @@ on:
         type: string
         default: "Add 1-3 substantial gameplay features to Neon Swarm. Keep every existing mechanic and screen intact; additions only."
       model:
-        description: "Gemini model ID (default is the free-tier Gemini 3.1 Flash-Lite)"
+        description: "Gemini model ID (default is stable Gemini 3.1 Flash-Lite; automatically falls back if unavailable)"
         required: false
         type: string
-        default: "gemini-3.8-flash"
+        default: "gemini-3.1-flash-lite"
 
 permissions:
   contents: write
@@ -55,7 +55,7 @@ jobs:
       - name: Generate game improvements with Gemini
         env:
           GEMINI_API: ${{ secrets.GEMINI_API || secrets.GEMINI_SECRET || secrets.GOOGLE_API_KEY }}
-          GEMINI_MODEL: ${{ inputs.model || 'gemini-3.8-flash' }}
+          GEMINI_MODEL: ${{ inputs.model || 'gemini-3.1-flash-lite' }}
           UPGRADE_GOAL: ${{ inputs.goal }}
         run: |
           if [ -z "$GEMINI_API" ]; then
@@ -170,44 +170,85 @@ jobs:
               required=["summary", "files"],
           )
 
-          print(f"🤖 Gemini model selected: {os.environ['GEMINI_MODEL']}")
-          print("🤖 Gemini is inspecting the existing game and planning an additive upgrade...")
-          import time
+          selected_model = os.environ["GEMINI_MODEL"].strip()
+          # A 503 is a capacity problem: switch models immediately rather than
+          # retrying the same unavailable endpoint for several minutes.
+          model_candidates = list(dict.fromkeys([
+              selected_model,
+              "gemini-3.1-flash-lite",
+              "gemini-2.5-flash",
+          ]))
 
           request_contents = (
               "UPGRADE REQUEST:\\n" + goal
               + "\\n\\nCURRENT REPOSITORY SOURCE:\\n"
               + "".join(context)
           )
-          retry_delays = (15, 30, 60, 90, 120)
-          for attempt in range(len(retry_delays) + 1):
-              try:
-                  response = client.models.generate_content(
-                      model=os.environ["GEMINI_MODEL"],
-                      contents=request_contents,
-                      config=types.GenerateContentConfig(
-                          system_instruction=system,
-                          max_output_tokens=60000,
-                          response_mime_type="application/json",
-                          response_schema=output_schema,
-                      ),
-                  )
-                  break
-              except Exception as exc:
-                  message = str(exc)
-                  retryable = any(
-                      marker in message
-                      for marker in ("429", "500", "502", "503", "504",
-                                     "UNAVAILABLE", "RESOURCE_EXHAUSTED")
-                  )
-                  if not retryable or attempt == len(retry_delays):
+          response = None
+          last_error = None
+
+          for model_index, model_name in enumerate(model_candidates):
+              print(f"🤖 Trying Gemini model: {model_name}", flush=True)
+              for attempt in range(2):
+                  try:
+                      response = client.models.generate_content(
+                          model=model_name,
+                          contents=request_contents,
+                          config=types.GenerateContentConfig(
+                              system_instruction=system,
+                              max_output_tokens=60000,
+                              response_mime_type="application/json",
+                              response_schema=output_schema,
+                          ),
+                      )
+                      print(f"🤖 Response received from {model_name}.", flush=True)
+                      break
+                  except Exception as exc:
+                      last_error = exc
+                      message = str(exc)
+                      unavailable = "503" in message or "UNAVAILABLE" in message
+                      retryable = any(
+                          marker in message
+                          for marker in ("429", "500", "502", "504",
+                                         "RESOURCE_EXHAUSTED")
+                      )
+
+                      if unavailable:
+                          if model_index + 1 < len(model_candidates):
+                              print(
+                                  f"⚠️ {model_name} is overloaded (503). "
+                                  f"Switching immediately to {model_candidates[model_index + 1]}.",
+                                  flush=True,
+                              )
+                              break
+                          raise
+
+                      if retryable and attempt == 0:
+                          delay = 8
+                          print(
+                              f"⚠️ Temporary API error from {model_name}; "
+                              f"one retry in {delay}s: {message}",
+                              flush=True,
+                          )
+                          time.sleep(delay)
+                          continue
+
+                      if model_index + 1 < len(model_candidates):
+                          print(
+                              f"⚠️ {model_name} failed; trying fallback "
+                              f"{model_candidates[model_index + 1]}: {message}",
+                              flush=True,
+                          )
+                          break
                       raise
-                  delay = retry_delays[attempt]
-                  print(
-                      f"Gemini temporary API error on attempt {attempt + 1}; "
-                      f"retrying in {delay}s: {message}"
-                  )
-                  time.sleep(delay)
+
+              if response is not None:
+                  break
+
+          if response is None:
+              raise SystemExit(
+                  "All Gemini models failed. Last error: " + str(last_error)
+              )
           if not response.text:
               raise SystemExit("Gemini returned an empty response.")
 
