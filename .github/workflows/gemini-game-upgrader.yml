@@ -1,25 +1,25 @@
-name: Groq Game Upgrader
+name: OpenRouter Game Upgrader
 
 on:
   workflow_dispatch:
     inputs:
       goal:
-        description: "What should the Groq model improve or add to Neon Swarm?"
+        description: "What should the OpenRouter model improve or add to Neon Swarm?"
         required: true
         type: string
         default: "Add 1-3 substantial gameplay features to Neon Swarm. Keep every existing mechanic and screen intact; additions only."
       model:
-        description: "Use auto to select a code-generation model available to your Groq API key"
+        description: "OpenRouter model ID (provider/model)"
         required: false
         type: string
-        default: "openai/gpt-oss-120b"
+        default: "anthropic/claude-sonnet-4.6"
 
 permissions:
   contents: write
   pull-requests: write
 
 concurrency:
-  group: groq-game-upgrader-${{ github.ref }}
+  group: openrouter-game-upgrader-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -52,14 +52,14 @@ jobs:
           fi
           python -m pip install ruff coverage bandit
 
-      - name: Generate game improvements with Groq
+      - name: Generate game improvements with OpenRouter
         env:
-          GROQ_API: ${{ secrets.GROQ_API }}
-          GROQ_MODEL: ${{ inputs.model || 'openai/gpt-oss-120b' }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ inputs.model || 'anthropic/claude-sonnet-4.6' }}
           UPGRADE_GOAL: ${{ inputs.goal }}
         run: |
-          if [ -z "$GROQ_API" ]; then
-            echo "::error::Add GROQ_API in repository Actions secrets (Groq API key)."
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::Add OPENROUTER_API_KEY in repository Actions secrets (OpenRouter API key)."
             exit 1
           fi
 
@@ -96,7 +96,7 @@ jobs:
               raise SystemExit("Neon Swarm.html was not found; refusing to guess the game structure.")
 
           context = []
-          # Stay within the 8,000 TPM on-demand limit. Send compact source
+          # Keep the request compact. Send compact source
           # excerpts and ask for a small unified diff, not whole game files.
           budget = 10_000
           per_file_budget = 3_500
@@ -138,7 +138,7 @@ jobs:
           Return a SMALL, precise unified diff only; never return complete files.
           Include proper diff headers (diff --git, --- and +++), with enough context
           for git apply. Keep the patch under 20 KB. Do not modify unrelated code.
-          The supplied source is intentionally excerpted to fit the API token budget.
+          The supplied source is intentionally excerpted to keep the request within API limits.
           Only make changes that can be safely grounded in the shown code; prefer
           additive code at known insertion points and do not invent unseen symbols.
           You may only create or modify Neon Swarm game files at repository root:
@@ -147,81 +147,22 @@ jobs:
           You may add a new neon_swarm_*.js module only if you also integrate it correctly
           into the browser game and Python server's standalone/inlining behavior.
           Keep the output under 100 KB. If safe additive implementation is not possible,
-          return an empty files array and explain why in summary.
+          return an empty patch and explain why in summary.
           """
 
           goal = os.environ["UPGRADE_GOAL"].strip()
           if not goal:
               raise SystemExit("The upgrade goal cannot be empty.")
 
-          requested_model = os.environ.get("GROQ_MODEL", "auto").strip()
-          api_key = os.environ["GROQ_API"]
-
-          # Model availability is account-specific. Select a model that this key
-          # can actually access and that is suitable for text/code generation.
-          models_request = urllib.request.Request(
-              "https://api.groq.com/openai/v1/models",
-              headers={
-                  "Authorization": "Bearer " + api_key,
-                  "User-Agent": "Cool-game-Groq-Upgrader",
-              },
-              method="GET",
-          )
-          try:
-              with urllib.request.urlopen(models_request, timeout=60) as response:
-                  models_result = json.loads(response.read().decode("utf-8"))
-          except urllib.error.HTTPError as exc:
-              details = exc.read().decode("utf-8", errors="replace")[:2000]
-              raise SystemExit(
-                  f"Could not list Groq models (HTTP {exc.code}): {details}"
-              ) from exc
-
-          available_ids = sorted(
-              item.get("id", "")
-              for item in models_result.get("data", [])
-              if isinstance(item, dict) and isinstance(item.get("id"), str)
-          )
-          # Exclude audio, transcription, moderation, and safety-only models.
-          blocked_markers = (
-              "prompt-guard", "safeguard", "guard", "whisper",
-              "orpheus", "allam",
-          )
-          generation_ids = [
-              model_id for model_id in available_ids
-              if not any(marker in model_id.lower() for marker in blocked_markers)
-          ]
-          if not generation_ids:
-              visible = ", ".join(available_ids[:30]) or "(none returned)"
-              raise SystemExit(
-                  "This GROQ_API key has no supported text-generation models. "
-                  "Models returned: " + visible
-              )
-
-          if requested_model.lower() == "auto":
-              preferred = [
-                  "openai/gpt-oss-120b",
-                  "openai/gpt-oss-20b",
-                  "qwen/qwen3.8-27b",
-              ]
-              model = next(
-                  (candidate for candidate in preferred if candidate in generation_ids),
-                  generation_ids[0],
-              )
-          elif requested_model in generation_ids:
-              model = requested_model
-          else:
-              visible = ", ".join(generation_ids)
-              raise SystemExit(
-                  f"Requested model {requested_model!r} is not available for "
-                  f"text generation with this GROQ_API key. Usable models "
-                  f"returned: {visible}. Select one of those models in the "
-                  "workflow input. No automatic model substitution will occur."
-              )
+          model = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-sonnet-4.6").strip()
+          api_key = os.environ["OPENROUTER_API_KEY"]
+          if not model:
+              raise SystemExit("OPENROUTER_MODEL cannot be empty.")
 
           payload = {
               "model": model,
               "temperature": 0.25,
-              "max_completion_tokens": 3000,
+              "max_tokens": 3000,
               "response_format": {"type": "json_object"},
               "messages": [
                   {"role": "system", "content": system},
@@ -231,29 +172,29 @@ jobs:
               ],
           }
           request = urllib.request.Request(
-              "https://api.groq.com/openai/v1/chat/completions",
+              "https://openrouter.ai/api/v1/chat/completions",
               data=json.dumps(payload).encode("utf-8"),
               headers={
                   "Authorization": "Bearer " + api_key,
                   "Content-Type": "application/json",
-                  "User-Agent": "Cool-game-Groq-the model-Upgrader",
+                  "User-Agent": "Cool-game-OpenRouter-Upgrader",
               },
               method="POST",
           )
 
-          print(f"🤖 Sending upgrade request to Groq using {model}...", flush=True)
+          print(f"🤖 Sending upgrade request to OpenRouter using {model}...", flush=True)
           try:
               with urllib.request.urlopen(request, timeout=240) as response:
                   api_result = json.loads(response.read().decode("utf-8"))
           except urllib.error.HTTPError as exc:
               details = exc.read().decode("utf-8", errors="replace")[:3000]
-              raise SystemExit(f"Groq API returned HTTP {exc.code}: {details}") from exc
+              raise SystemExit(f"OpenRouter API returned HTTP {exc.code}: {details}") from exc
           except Exception as exc:
-              raise SystemExit(f"Groq request failed: {exc}") from exc
+              raise SystemExit(f"OpenRouter request failed: {exc}") from exc
 
           choices = api_result.get("choices") or []
           if not choices:
-              raise SystemExit("Groq returned no completion choices.")
+              raise SystemExit("OpenRouter returned no completion choices.")
           response_text = (choices[0].get("message") or {}).get("content")
           if not isinstance(response_text, str) or not response_text.strip():
               raise SystemExit("Model returned an empty response.")
@@ -276,7 +217,7 @@ jobs:
           if len(patch.encode("utf-8")) > 20_000:
               raise SystemExit("Generated patch exceeded the 20 KB safety limit.")
 
-          patch_file = Path("/tmp/groq-upgrade.patch")
+          patch_file = Path("/tmp/openrouter-upgrade.patch")
           patch_file.write_text(patch, encoding="utf-8")
           check = subprocess.run(
               ["git", "apply", "--check", str(patch_file)],
@@ -363,7 +304,7 @@ jobs:
                   max_removed_lines = max(10, int(len(baseline_lines) * 0.08))
                   if removed_lines > max_removed_lines:
                       raise SystemExit(
-                          "FEATURE-PRESERVATION BLOCK: Llama removed or rewrote "
+                          "FEATURE-PRESERVATION BLOCK: Claude removed or rewrote "
                           f"{removed_lines} existing lines; maximum allowed is "
                           f"{max_removed_lines} ({len(baseline_lines)} baseline lines)."
                       )
@@ -414,16 +355,16 @@ jobs:
               changed.append(name)
 
           if not changed:
-              Path("groq-upgrade-summary.md").write_text(
-                  "# Groq Game Upgrade\n\n"
+              Path("openrouter-upgrade-summary.md").write_text(
+                  "# OpenRouter Game Upgrade\n\n"
                   + (summary or "No changes were generated.") + "\n",
                   encoding="utf-8",
               )
               print("Model proposed no game file changes.")
               raise SystemExit(2)
 
-          Path("groq-upgrade-summary.md").write_text(
-              "# Groq Game Upgrade\n\n"
+          Path("openrouter-upgrade-summary.md").write_text(
+              "# OpenRouter Game Upgrade\n\n"
               + (summary or "Gameplay improvements generated.")
               + "\n\nChanged files:\n"
               + "".join(f"- {name}\n" for name in changed),
@@ -475,8 +416,8 @@ jobs:
           if ! gh pr create \
             --base main \
             --head "$BRANCH" \
-            --title "feat: Groq game improvements" \
-            --body-file groq-upgrade-summary.md; then
+            --title "feat: OpenRouter game improvements" \
+            --body-file openrouter-upgrade-summary.md; then
             echo "::warning::The branch was pushed, but GitHub Actions is not permitted to create pull requests."
             echo "Enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests, or open the PR using the URL above."
           fi
@@ -485,7 +426,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: groq-game-upgrade-summary
-          path: groq-upgrade-summary.md
+          name: openrouter-game-upgrade-summary
+          path: openrouter-upgrade-summary.md
           if-no-files-found: ignore
           retention-days: 30
