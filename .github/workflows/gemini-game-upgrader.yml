@@ -62,6 +62,9 @@ jobs:
           fi
           python -m pip install ruff coverage bandit
 
+      - name: Check AI upgrader syntax
+        run: python -m py_compile .github/scripts/ai_game_upgrader.py
+
       - name: Generate upgrades with ordered AI fallback
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
