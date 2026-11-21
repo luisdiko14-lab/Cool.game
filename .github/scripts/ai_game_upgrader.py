@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import socket
 import subprocess
 import tempfile
 import time
@@ -96,17 +97,24 @@ def post_json(url, payload, headers):
         method="POST",
     )
     try:
-        attempts = 3 if "/models/" in url and ":generateContent" in url else 1
+        is_gemini = "/models/" in url and ":generateContent" in url
+        attempts = 3 if is_gemini else 1
         for attempt in range(attempts):
             try:
-                with urllib.request.urlopen(req, timeout=210) as response:
+                with urllib.request.urlopen(req, timeout=240) as response:
                     data = response.read().decode("utf-8")
                 break
             except urllib.error.HTTPError as exc:
-                if exc.code not in {429, 500, 502, 503, 504} or attempt == attempts - 1:
+                if not is_gemini or exc.code not in {429, 500, 502, 503, 504} or attempt == attempts - 1:
                     raise
                 delay = 8 * (2 ** attempt)
                 print(f"Gemini temporary HTTP {exc.code}; retrying in {delay}s...", flush=True)
+                time.sleep(delay)
+            except (TimeoutError, socket.timeout):
+                if not is_gemini or attempt == attempts - 1:
+                    raise
+                delay = 10 * (attempt + 1)
+                print(f"Gemini request timed out; retrying in {delay}s...", flush=True)
                 time.sleep(delay)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:1500]
@@ -248,8 +256,15 @@ def candidate(result, sources):
         if not isinstance(edit, dict):
             raise ValueError(f"Edit #{i} is not an object.")
         name, find, replace = edit.get("path"), edit.get("find"), edit.get("replace")
-        if not isinstance(name, str) or not allowed(name) or name not in sources:
-            raise ValueError(f"Edit #{i} targets an unsafe or missing file: {name!r}")
+        # The source map is built exclusively from allowlisted repository files.
+        # Membership is the authoritative safety check and avoids path-normalization
+        # mismatches between model output and the actual checked-out filename.
+        if not isinstance(name, str) or name not in sources:
+            available = ", ".join(sorted(sources))
+            raise ValueError(
+                f"Edit #{i} targets a file not present in the checked source set: {name!r}. "
+                f"Available files: [{available}]"
+            )
         if not isinstance(find, str) or len(find.strip()) < 6:
             raise ValueError(f"Edit #{i} has no exact source anchor.")
         if not isinstance(replace, str) or not replace:
@@ -287,6 +302,7 @@ def main():
         return 1
     try:
         sources = load_sources()
+        print("📂 Loaded allowlisted game files: " + ", ".join(sorted(sources)), flush=True)
         system, user = prompts(goal, sources)
     except Exception as exc:
         write_summary("Upgrade Not Applied", [f"Could not prepare source context: {exc}", "No game files were modified."])
@@ -332,7 +348,7 @@ def main():
             errors.append(message)
             print("⚠️ " + message, flush=True)
             if "raw" in locals() and isinstance(raw, str):
-                excerpt = re.sub(r"\\s+", " ", raw)[:1200]
+                excerpt = re.sub(r"\s+", " ", raw)[:1200]
                 print(f"Model response excerpt (for diagnosis): {excerpt}", flush=True)
             print("Trying the next provider; no changes from this response were written.", flush=True)
 
