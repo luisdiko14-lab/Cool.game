@@ -74,7 +74,7 @@ jobs:
           from pathlib import Path
 
           root = Path(".")
-          allowed_exact = {"Neon Swarm.html", "neon_swarm.py"}
+          allowed_exact = {"Neon Swarm.html", "neon_swarm.py", "requirements.txt", "pyproject.toml", "package.json", "package-lock.json"}
 
           def allowed(path: str) -> bool:
               p = Path(path)
@@ -130,8 +130,11 @@ jobs:
 
           Implement 1-3 real, cohesive gameplay improvements with polished visual/audio feedback
           and sensible balance. Avoid placeholder features, fake buttons, TODOs, stubs,
-          unnecessary dependencies, external network assets, telemetry, secrets and unrelated
-          rewrites. Keep save data backward-compatible and retain existing controls.
+          external network assets, telemetry, secrets and unrelated rewrites. Prefer zero new
+          dependencies; if one is genuinely required, update requirements.txt AND pyproject.toml
+          for Python, or package.json AND package-lock.json for Node. Keep versions sensibly
+          bounded and never add unrelated packages. Keep save data backward-compatible
+          and retain existing controls.
 
           Return exactly one JSON object:
           {"summary":"...","patch":"standard unified git diff"}.
@@ -141,11 +144,15 @@ jobs:
           The supplied source is intentionally excerpted to keep the request within API limits.
           Only make changes that can be safely grounded in the shown code; prefer
           additive code at known insertion points and do not invent unseen symbols.
-          You may only create or modify Neon Swarm game files at repository root:
+          You may create or modify Neon Swarm game files at repository root:
           Neon Swarm.html, neon_swarm.py, or files matching neon_swarm_*.js.
-          Do not change auth.py, tests, workflows, dependencies, configuration or documentation.
+          Dependency changes are allowed only in requirements.txt, pyproject.toml,
+          package.json and package-lock.json, and only when required by the implementation.
+          Do not change auth.py, tests, workflows, other configuration or documentation.
           You may add a new neon_swarm_*.js module only if you also integrate it correctly
           into the browser game and Python server's standalone/inlining behavior.
+          If package.json changes, update package-lock.json consistently. If Python dependencies
+          change, keep requirements.txt and pyproject.toml in sync.
           Keep the output under 100 KB. If safe additive implementation is not possible,
           return an empty patch and explain why in summary.
           """
@@ -374,6 +381,19 @@ jobs:
           print("Changed files:", ", ".join(changed))
           PY
 
+      - name: Install newly generated dependencies
+        run: |
+          set -euo pipefail
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          fi
+          if [ -f package-lock.json ]; then
+            npm ci --ignore-scripts --no-audit --no-fund
+          elif [ -f package.json ]; then
+            echo "::error::package.json exists without package-lock.json; refusing an unlocked dependency install."
+            exit 1
+          fi
+
       - name: Validate generated game changes
         run: |
           set -euo pipefail
@@ -392,7 +412,7 @@ jobs:
       - name: Stop if there are no game changes
         id: changes
         run: |
-          if [ -z "$(git status --porcelain -- 'Neon Swarm.html' 'neon_swarm.py' 'neon_swarm_*.js')" ]; then
+          if [ -z "$(git status --porcelain -- 'Neon Swarm.html' 'neon_swarm.py' 'neon_swarm_*.js' 'requirements.txt' 'pyproject.toml' 'package.json' 'package-lock.json')" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No game source changes to publish."
           else
@@ -408,7 +428,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$BRANCH"
-          git add -- 'Neon Swarm.html' 'neon_swarm.py' 'neon_swarm_*.js'
+          git add -- 'Neon Swarm.html' 'neon_swarm.py' 'neon_swarm_*.js' 'requirements.txt' 'pyproject.toml' 'package.json' 'package-lock.json'
           git commit -m "feat: AI-generated game improvements"
           git push --set-upstream origin "$BRANCH"
           echo "Pushed upgrade branch: $BRANCH"
