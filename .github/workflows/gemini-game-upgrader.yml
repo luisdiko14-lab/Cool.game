@@ -125,7 +125,7 @@ jobs:
           if not goal:
               raise SystemExit("The upgrade goal cannot be empty.")
 
-          client = genai.Client(api_key=os.environ["GEMINI_API"])
+          client = genai.Client(\n    api_key=os.environ["GEMINI_API"],\n    http_options=types.HttpOptions(api_version="v1beta"),\n)
           response = client.models.generate_content(
               model=os.environ["GEMINI_MODEL"],
               contents=(
