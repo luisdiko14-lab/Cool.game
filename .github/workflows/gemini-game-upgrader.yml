@@ -78,7 +78,7 @@ jobs:
 
           def allowed(path: str) -> bool:
               p = Path(path)
-              if p.is_absolute() or ".." in p.parts or "\" in path:
+              if p.is_absolute() or ".." in p.parts or "\\" in path:
                   return False
               if path in allowed_exact:
                   return True
@@ -322,7 +322,7 @@ jobs:
           )
           print(summary)
           print("Changed files:", ", ".join(changed))
-          PYY
+          PY
 
       - name: Validate generated game changes
         run: |
