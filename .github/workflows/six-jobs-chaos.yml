@@ -1,0 +1,118 @@
+name: Six Jobs Chaos Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_count:
+        description: "How many of the 50 selected Node.js packages should be installed? (1-50)"
+        required: true
+        type: number
+        default: 50
+
+permissions:
+  contents: read
+
+jobs:
+  error-job-1:
+    name: "Error Job 1 - Intentional Failure"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Throw an intentional error
+        run: |
+          echo "This job is supposed to fail."
+          exit 1
+
+  error-job-2:
+    name: "Error Job 2 - Intentional Failure"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Throw an intentional error
+        run: |
+          echo "This job is supposed to fail."
+          exit 1
+
+  error-job-3:
+    name: "Error Job 3 - Intentional Failure"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Throw an intentional error
+        run: |
+          echo "This job is supposed to fail."
+          exit 1
+
+  error-job-4:
+    name: "Error Job 4 - Intentional Failure"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Throw an intentional error
+        run: |
+          echo "This job is supposed to fail."
+          exit 1
+
+  error-job-5:
+    name: "Error Job 5 - Intentional Failure"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Throw an intentional error
+        run: |
+          echo "This job is supposed to fail."
+          exit 1
+
+  install-node-packages:
+    name: "Install Selected Node Packages"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: ''
+
+      - name: Validate package count and prepare project
+        id: prepare
+        shell: bash
+        env:
+          PACKAGE_COUNT: ${{ inputs.package_count }}
+        run: |
+          set -euo pipefail
+          count="${PACKAGE_COUNT:-50}"
+          if ! [[ "$count" =~ ^[0-9]+$ ]] || (( count < 1 || count > 50 )); then
+            echo "::error::package_count must be a number from 1 to 50."
+            exit 1
+          fi
+
+          mkdir node-package-test
+          cd node-package-test
+          npm init -y
+          echo "PACKAGE_COUNT=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Install requested number of packages
+        working-directory: node-package-test
+        shell: bash
+        env:
+          PACKAGE_COUNT: ${{ steps.prepare.outputs.PACKAGE_COUNT }}
+        run: |
+          set -euo pipefail
+
+          packages=(
+            lodash axios chalk kleur picocolors dayjs date-fns uuid nanoid
+            zod joi express cors helmet morgan dotenv yaml js-yaml minimist
+            yargs commander ora cli-table3 inquirer prompts fs-extra glob
+            fast-glob chokidar micromatch semver debug ms pretty-ms p-limit
+            p-retry got undici node-fetch cross-env rimraf mkdirp archiver
+            unzipper tar csv-parse papaparse marked highlight.js strip-ansi
+          )
+
+          count="$PACKAGE_COUNT"
+          selected=("${packages[@]:0:count}")
+
+          echo "Installing ${#selected[@]} of 50 packages:"
+          printf ' - %s\n' "${selected[@]}"
+
+          npm install --no-save --ignore-scripts --legacy-peer-deps "${selected[@]}"
+
+      - name: Show installation summary
+        working-directory: node-package-test
+        run: |
+          echo "Installed package count:"
+          npm ls --depth=0 || true
