@@ -384,14 +384,15 @@ jobs:
       - name: Install newly generated dependencies
         run: |
           set -euo pipefail
-          if [ -f requirements.txt ]; then
+          if ! git diff --quiet -- requirements.txt pyproject.toml; then
             python -m pip install -r requirements.txt
           fi
-          if [ -f package-lock.json ]; then
+          if ! git diff --quiet -- package.json package-lock.json; then
+            if [ ! -f package-lock.json ]; then
+              echo "::error::package.json changed without package-lock.json; refusing an unlocked dependency install."
+              exit 1
+            fi
             npm ci --ignore-scripts --no-audit --no-fund
-          elif [ -f package.json ]; then
-            echo "::error::package.json exists without package-lock.json; refusing an unlocked dependency install."
-            exit 1
           fi
 
       - name: Validate generated game changes
