@@ -105,18 +105,19 @@ def post_json(url, payload, headers):
     return result
 
 
-def openai_compatible(url, key, model, system, user):
+def openai_compatible(url, key, model, system, user, token_field="max_tokens"):
+    payload = {
+        "model": model,
+        "temperature": 0.2,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+    payload[token_field] = 8000
     result = post_json(
         url,
-        {
-            "model": model,
-            "temperature": 0.2,
-            "max_tokens": 8000,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        },
+        payload,
         {"Authorization": f"Bearer {key}", "User-Agent": "Cool-game-AI-Upgrader"},
     )
     choices = result.get("choices") or []
@@ -286,7 +287,7 @@ def main():
          lambda key, model: gemini(key, model, system, user)),
         ("Groq", os.getenv("GROQ_API_KEY", "").strip(),
          os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip(),
-         lambda key, model: openai_compatible("https://api.groq.com/openai/v1/chat/completions", key, model, system, user)),
+         lambda key, model: openai_compatible("https://api.groq.com/openai/v1/chat/completions", key, model, system, user, "max_completion_tokens")),
     ]
     errors = []
     configured = False
