@@ -283,9 +283,9 @@ def main():
          os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b").strip(),
          lambda key, model: openai_compatible("https://openrouter.ai/api/v1/chat/completions", key, model, system, user)),
         ("Gemini", os.getenv("GEMINI_API_KEY", "").strip(),
-         os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip(),
+         os.getenv("GEMINI_MODEL", "gemini-3.1-flash").strip(),
          lambda key, model: gemini(key, model, system, user)),
-        ("Groq", os.getenv("GROQ_API_KEY", "").strip(),
+        ("Groq", os.getenv("GROQ_API_KEY", os.getenv("GROQ_API", "")).strip(),
          os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip(),
          lambda key, model: openai_compatible("https://api.groq.com/openai/v1/chat/completions", key, model, system, user, "max_completion_tokens")),
     ]
@@ -317,7 +317,7 @@ def main():
             print("Trying the next provider; no changes from this response were written.", flush=True)
 
     if not configured:
-        errors.append("No API keys configured. Add OPENROUTER_API_KEY, GEMINI_API_KEY/GEMINI_SECRET, or GROQ_API_KEY/GROQ_SECRET.")
+        errors.append("No API keys configured. Add OPENROUTER_API_KEY, GEMINI_API_KEY/GEMINI_SECRET, or GROQ_API/GROQ_API_KEY/GROQ_SECRET.")
     write_summary("Neon Swarm Upgrade Not Applied", [
         "All providers failed or were unavailable. The game source was left untouched.",
         "", "Provider results:", *[f"- {x}" for x in errors],
