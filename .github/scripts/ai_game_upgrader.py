@@ -40,12 +40,18 @@ def load_sources():
     sources = {}
     total = 0
     for path in paths:
-        if path.is_file() and allowed(path.as_posix()):
+        if not path.is_file():
+            continue
+        # ROOT is absolute, but model edit paths must be repository-relative.
+        # Passing path.as_posix() here produced an absolute path, causing every
+        # otherwise-valid source file to fail allowed() and leaving sources empty.
+        relative_name = path.relative_to(ROOT).as_posix()
+        if allowed(relative_name):
             body = path.read_text(encoding="utf-8")
             total += len(body.encode("utf-8"))
             if total > 500_000:
                 raise RuntimeError("Game source exceeds the 500 KB safety limit.")
-            sources[path.as_posix()] = body
+            sources[relative_name] = body
     return sources
 
 
