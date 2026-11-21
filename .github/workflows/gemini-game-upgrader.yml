@@ -172,20 +172,42 @@ jobs:
 
           print(f"🤖 Gemini model selected: {os.environ['GEMINI_MODEL']}")
           print("🤖 Gemini is inspecting the existing game and planning an additive upgrade...")
-          response = client.models.generate_content(
-              model=os.environ["GEMINI_MODEL"],
-              contents=(
-                  "UPGRADE REQUEST:\\n" + goal
-                  + "\\n\\nCURRENT REPOSITORY SOURCE:\\n"
-                  + "".join(context)
-              ),
-              config=types.GenerateContentConfig(
-                  system_instruction=system,
-                  max_output_tokens=60000,
-                  response_mime_type="application/json",
-                  response_schema=output_schema,
-              ),
+          import time
+
+          request_contents = (
+              "UPGRADE REQUEST:\\n" + goal
+              + "\\n\\nCURRENT REPOSITORY SOURCE:\\n"
+              + "".join(context)
           )
+          retry_delays = (15, 30, 60, 90, 120)
+          for attempt in range(len(retry_delays) + 1):
+              try:
+                  response = client.models.generate_content(
+                      model=os.environ["GEMINI_MODEL"],
+                      contents=request_contents,
+                      config=types.GenerateContentConfig(
+                          system_instruction=system,
+                          max_output_tokens=60000,
+                          response_mime_type="application/json",
+                          response_schema=output_schema,
+                      ),
+                  )
+                  break
+              except Exception as exc:
+                  message = str(exc)
+                  retryable = any(
+                      marker in message
+                      for marker in ("429", "500", "502", "503", "504",
+                                     "UNAVAILABLE", "RESOURCE_EXHAUSTED")
+                  )
+                  if not retryable or attempt == len(retry_delays):
+                      raise
+                  delay = retry_delays[attempt]
+                  print(
+                      f"Gemini temporary API error on attempt {attempt + 1}; "
+                      f"retrying in {delay}s: {message}"
+                  )
+                  time.sleep(delay)
           if not response.text:
               raise SystemExit("Gemini returned an empty response.")
 
