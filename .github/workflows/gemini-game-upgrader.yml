@@ -19,7 +19,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: gemini-game-upgrader-${{ github.ref }}
+  group: groq-llama-game-upgrader-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -78,7 +78,7 @@ jobs:
 
           def allowed(path: str) -> bool:
               p = Path(path)
-              if p.is_absolute() or ".." in p.parts or "\\" in path:
+              if p.is_absolute() or ".." in p.parts or "\" in path:
                   return False
               if path in allowed_exact:
                   return True
@@ -101,7 +101,7 @@ jobs:
               if budget <= 0:
                   break
               chunk = body[:min(len(body), budget)]
-              context.append(f"\\n===== FILE: {name} =====\\n{chunk}")
+              context.append(f"\n===== FILE: {name} =====\n{chunk}")
               budget -= len(chunk)
 
           system = """
@@ -158,8 +158,8 @@ jobs:
               "messages": [
                   {"role": "system", "content": system},
                   {"role": "user", "content":
-                      "UPGRADE REQUEST:\\n" + goal
-                      + "\\n\\nCURRENT REPOSITORY SOURCE:\\n" + "".join(context)}
+                      "UPGRADE REQUEST:\n" + goal
+                      + "\n\nCURRENT REPOSITORY SOURCE:\n" + "".join(context)}
               ],
           }
           request = urllib.request.Request(
@@ -213,12 +213,12 @@ jobs:
           )
           baseline_lines = baseline_html.splitlines()
           baseline_ids = set(re.findall(
-              r"""\\bid\\s*=\\s*["']([^"']+)["']""",
+              r"""\bid\s*=\s*["']([^"']+)["']""",
               baseline_html,
               re.IGNORECASE,
           ))
           baseline_functions = set(re.findall(
-              r"""\\bfunction\\s+([A-Za-z_$][\\w$]*)\\s*\\(""",
+              r"""\bfunction\s+([A-Za-z_$][\w$]*)\s*\(""",
               baseline_html,
           ))
 
@@ -233,7 +233,7 @@ jobs:
                   raise SystemExit(f"Rejected unsafe output path: {name!r}")
               if not isinstance(body, str) or not body.strip():
                   raise SystemExit(f"Rejected empty or invalid file: {name}")
-              if "\\x00" in body:
+              if "\x00" in body:
                   raise SystemExit(f"Rejected binary content in {name}")
               total_bytes += len(body.encode("utf-8"))
               if total_bytes > 100_000:
@@ -264,7 +264,7 @@ jobs:
                           f"{len(generated_lines)} lines; at least {min_lines} required."
                       )
                   generated_ids = set(re.findall(
-                      r"""\\bid\\s*=\\s*["']([^"']+)["']""",
+                      r"""\bid\s*=\s*["']([^"']+)["']""",
                       body,
                       re.IGNORECASE,
                   ))
@@ -275,7 +275,7 @@ jobs:
                           + ", ".join(missing_ids[:30])
                       )
                   generated_functions = set(re.findall(
-                      r"""\\bfunction\\s+([A-Za-z_$][\\w$]*)\\s*\\(""",
+                      r"""\bfunction\s+([A-Za-z_$][\w$]*)\s*\(""",
                       body,
                   ))
                   missing_functions = sorted(baseline_functions - generated_functions)
@@ -306,18 +306,18 @@ jobs:
 
           if not changed:
               Path("llama-upgrade-summary.md").write_text(
-                  "# Groq Llama Game Upgrade\\n\\n"
-                  + (summary or "No changes were generated.") + "\\n",
+                  "# Groq Llama Game Upgrade\n\n"
+                  + (summary or "No changes were generated.") + "\n",
                   encoding="utf-8",
               )
               print("Llama proposed no game file changes.")
               raise SystemExit(2)
 
           Path("llama-upgrade-summary.md").write_text(
-              "# Groq Llama Game Upgrade\\n\\n"
+              "# Groq Llama Game Upgrade\n\n"
               + (summary or "Gameplay improvements generated.")
-              + "\\n\\nChanged files:\\n"
-              + "".join(f"- {name}\\n" for name in changed),
+              + "\n\nChanged files:\n"
+              + "".join(f"- {name}\n" for name in changed),
               encoding="utf-8",
           )
           print(summary)
@@ -376,7 +376,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gemini-game-upgrade-summary
+          name: llama-game-upgrade-summary
           path: llama-upgrade-summary.md
           if-no-files-found: ignore
           retention-days: 30
