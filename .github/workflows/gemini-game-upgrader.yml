@@ -44,6 +44,18 @@ jobs:
         with:
           node-version: "22"
 
+      # Reuse downloaded Python wheels and npm packages between workflow runs.
+      # The cache key changes when dependency manifests or runtime versions change.
+      - name: Cache Python and Node package downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.npm
+          key: ${{ runner.os }}-deps-py3.12-node22-${{ hashFiles('requirements.txt', 'pyproject.toml', 'package.json', 'package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-py3.12-node22-
+
       - name: Install project and validation tools
         run: |
           python -m pip install --upgrade pip
