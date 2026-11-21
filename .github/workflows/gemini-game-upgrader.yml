@@ -9,10 +9,10 @@ on:
         type: string
         default: "Add 1-3 substantial gameplay features to Neon Swarm. Keep every existing mechanic and screen intact; additions only."
       model:
-        description: "Groq Llama model ID (default: llama-3.3-70b-versatile)"
+        description: "Use auto to select a Llama model available to your Groq API key"
         required: false
         type: string
-        default: "llama-3.3-70b-versatile"
+        default: "auto"
 
 permissions:
   contents: write
@@ -55,7 +55,7 @@ jobs:
       - name: Generate game improvements with Groq Llama
         env:
           GROQ_API: ${{ secrets.GROQ_API }}
-          GROQ_MODEL: ${{ inputs.model || 'llama-3.3-70b-versatile' }}
+          GROQ_MODEL: ${{ inputs.model || 'auto' }}
           UPGRADE_GOAL: ${{ inputs.goal }}
         run: |
           if [ -z "$GROQ_API" ]; then
@@ -146,9 +146,72 @@ jobs:
           if not goal:
               raise SystemExit("The upgrade goal cannot be empty.")
 
-          model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
-          if not model.startswith("llama-"):
-              raise SystemExit("Only Groq-hosted Llama models are allowed for this workflow.")
+          requested_model = os.environ.get("GROQ_MODEL", "auto").strip()
+          api_key = os.environ["GROQ_API"]
+
+          # Model availability is account-specific. Discover models using this key
+          # instead of assuming a retired or restricted model ID is accessible.
+          models_request = urllib.request.Request(
+              "https://api.groq.com/openai/v1/models",
+              headers={
+                  "Authorization": "Bearer " + api_key,
+                  "User-Agent": "Cool-game-Groq-Llama-Upgrader",
+              },
+              method="GET",
+          )
+          try:
+              with urllib.request.urlopen(models_request, timeout=60) as response:
+                  models_result = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              details = exc.read().decode("utf-8", errors="replace")[:2000]
+              raise SystemExit(
+                  f"Could not list Groq models (HTTP {exc.code}): {details}"
+              ) from exc
+
+          available_ids = sorted(
+              item.get("id", "")
+              for item in models_result.get("data", [])
+              if isinstance(item, dict) and isinstance(item.get("id"), str)
+          )
+          llama_ids = [
+              model_id for model_id in available_ids
+              if "llama" in model_id.lower()
+          ]
+          if not llama_ids:
+              visible = ", ".join(available_ids[:30]) or "(none returned)"
+              raise SystemExit(
+                  "This GROQ_API key has no Llama models available. "
+                  "Groq's model list for this key contains: " + visible
+                  + ". Enable/access a Llama model in GroqCloud or use an API key "
+                  "with Llama access; this workflow will not silently switch to a "
+                  "non-Llama model."
+              )
+
+          if requested_model.lower() == "auto":
+              preferred = [
+                  "llama-3.3-70b-versatile",
+                  "llama-3.1-8b-instant",
+              ]
+              model = next(
+                  (candidate for candidate in preferred if candidate in llama_ids),
+                  llama_ids[0],
+              )
+          elif requested_model in llama_ids:
+              model = requested_model
+          else:
+              print(
+                  f"::warning::Requested model {requested_model!r} is not available "
+                  "to this key; selecting an available Llama model instead."
+              )
+              model = next(
+                  (
+                      candidate for candidate in [
+                          "llama-3.3-70b-versatile",
+                          "llama-3.1-8b-instant",
+                      ] if candidate in llama_ids
+                  ),
+                  llama_ids[0],
+              )
 
           payload = {
               "model": model,
@@ -166,7 +229,7 @@ jobs:
               "https://api.groq.com/openai/v1/chat/completions",
               data=json.dumps(payload).encode("utf-8"),
               headers={
-                  "Authorization": "Bearer " + os.environ["GROQ_API"],
+                  "Authorization": "Bearer " + api_key,
                   "Content-Type": "application/json",
                   "User-Agent": "Cool-game-Groq-Llama-Upgrader",
               },
