@@ -269,9 +269,63 @@ jobs:
               raise SystemExit("Model response did not contain a unified diff patch.")
           if len(patch.encode("utf-8")) > 20_000:
               raise SystemExit("Generated patch exceeded the 20 KB safety limit.")
-          if patch.lstrip().startswith("*** Begin Patch") or not patch.lstrip().startswith("diff --git "):
+          # Some models ignore the requested format and return the
+          # OpenAI apply_patch envelope (*** Begin Patch). Ask once for a
+          # format-only conversion before rejecting the response.
+          if not patch.lstrip().startswith("diff --git "):
+              print("⚠️ Model returned a non-Git patch; requesting unified-diff conversion...", flush=True)
+              convert_payload = {
+                  "model": model,
+                  "temperature": 0,
+                  "max_tokens": 5000,
+                  "response_format": {"type": "json_object"},
+                  "messages": [
+                      {"role": "system", "content":
+                          "You are a patch-format converter. Return exactly one JSON object "
+                          "with string fields summary and patch. Convert the supplied patch "
+                          "into a standard Git unified diff. The patch MUST begin with "
+                          "'diff --git ', include --- and +++ headers and valid @@ hunks. "
+                          "Never return *** Begin Patch, *** Update File, *** Add File, "
+                          "Markdown fences, or full-file JSON. Preserve every intended edit "
+                          "exactly; do not invent, omit, or redesign changes. If conversion "
+                          "is impossible or input is truncated, return an empty patch."},
+                      {"role": "user", "content":
+                          "Convert this patch to standard unified Git diff. Preserve its edits. "
+                          "Return JSON only.\n\n" + patch[:20000]}
+                  ],
+              }
+              convert_request = urllib.request.Request(
+                  "https://openrouter.ai/api/v1/chat/completions",
+                  data=json.dumps(convert_payload).encode("utf-8"),
+                  headers={
+                      "Authorization": "Bearer " + api_key,
+                      "Content-Type": "application/json",
+                      "User-Agent": "Cool-game-OpenRouter-Upgrader",
+                  },
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(convert_request, timeout=240) as response:
+                      converted_api = json.loads(response.read().decode("utf-8"))
+                  converted_choices = converted_api.get("choices") or []
+                  converted_text = (converted_choices[0].get("message") or {}).get("content") if converted_choices else None
+                  if not isinstance(converted_text, str) or not converted_text.strip():
+                      raise ValueError("Patch conversion returned an empty response.")
+                  converted = parse_model_json(converted_text)
+                  converted_patch = converted.get("patch") if isinstance(converted, dict) else None
+                  if not isinstance(converted_patch, str) or not converted_patch.strip():
+                      raise ValueError("Patch conversion did not return a patch.")
+                  patch = converted_patch.strip()
+                  summary = str(converted.get("summary") or summary).strip()
+              except Exception as conversion_error:
+                  raise SystemExit(
+                      "Model returned a non-standard patch and conversion failed; "
+                      "no files were modified. " + str(conversion_error)
+                  ) from conversion_error
+
+          if not patch.lstrip().startswith("diff --git "):
               raise SystemExit(
-                  "Expected a standard unified Git diff beginning with 'diff --git'; "
+                  "Patch is still not a standard unified Git diff after one conversion attempt; "
                   "no files were modified."
               )
           if "\n--- " not in patch or "\n+++ " not in patch:
