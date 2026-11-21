@@ -219,12 +219,12 @@ jobs:
           )
           baseline_lines = baseline_html.splitlines()
           baseline_ids = set(re.findall(
-              r'\\bid\\s*=\\s*["\\']([^"\\']+)["\\']',
+              r"""\bid\s*=\s*["']([^"']+)["']""",
               baseline_html,
               re.IGNORECASE,
           ))
           baseline_functions = set(re.findall(
-              r'\\bfunction\\s+([A-Za-z_$][\\w$]*)\\s*\\(',
+              r"""\bfunction\s+([A-Za-z_$][\w$]*)\s*\(""",
               baseline_html,
           ))
 
@@ -275,7 +275,7 @@ jobs:
                       )
 
                   generated_ids = set(re.findall(
-                      r'\\bid\\s*=\\s*["\\']([^"\\']+)["\\']',
+                      r"""\bid\s*=\s*["']([^"']+)["']""",
                       body,
                       re.IGNORECASE,
                   ))
@@ -287,7 +287,7 @@ jobs:
                       )
 
                   generated_functions = set(re.findall(
-                      r'\\bfunction\\s+([A-Za-z_$][\\w$]*)\\s*\\(',
+                      r"""\bfunction\s+([A-Za-z_$][\w$]*)\s*\(""",
                       body,
                   ))
                   missing_functions = sorted(
