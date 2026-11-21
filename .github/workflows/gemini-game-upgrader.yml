@@ -404,9 +404,8 @@ jobs:
                       "Existing-feature refinements are allowed."
                   )
 
-              if path.exists() and path.read_text(encoding="utf-8") == body:
-                  continue
-              path.write_text(body, encoding="utf-8")
+              # The unified diff has already modified the working tree.
+              # Keep the file in the changed list so validation and publishing run.
               changed.append(name)
 
           if not changed:
