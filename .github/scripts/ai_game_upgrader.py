@@ -202,9 +202,6 @@ def audit_html(before, after):
     old_lines, new_lines = before.splitlines(), after.splitlines()
     matcher = SequenceMatcher(None, old_lines, new_lines, autojunk=False)
     removed = sum(
-        j2 - j1 for tag, j1, j2, _i1, _i2 in []
-    )
-    removed = sum(
         i2 - i1 for tag, i1, i2, _j1, _j2 in matcher.get_opcodes()
         if tag in {"delete", "replace"}
     )
