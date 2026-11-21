@@ -314,6 +314,7 @@ def main():
             continue
         configured = True
         print(f"🤖 Trying {name} using {model}...", flush=True)
+        raw = ""
         try:
             raw = generate(key, model)
             result = parse_json(raw)
