@@ -5,6 +5,21 @@
   if (!core) return;
 
   const { Game, Profile, Input, FX, Sfx, TYPES, MAX_WAVE, canvas } = core;
+
+  // Keep combat feedback readable: preserve wave/boss/timer announcements,
+  // but rate-limit the many optional reward and kill notifications.
+  const originalFxText = FX.text.bind(FX);
+  let lastAmbientTextAt = -Infinity;
+  FX.text = function(x, y, message, ...style) {
+    const label = String(message ?? '');
+    const important = /^(?:WAVE(?:\\s|$)|Wave\\s+\\d|FINAL BOSS|HARDCORE BOSS|BOSS SHIELD|ENDLESS BOSS|TIME ATTACK|FINAL WAVE)/i.test(label);
+    if (!important) {
+      const now = performance.now();
+      if (now - lastAmbientTextAt < 1250) return;
+      lastAmbientTextAt = now;
+    }
+    return originalFxText(x, y, message, ...style);
+  };
   const STORAGE_KEY = 'neonswarm.features';
   const MODE_NAMES = {
     campaign: 'Campaign', daily: 'Daily challenge', endless: 'Endless survival',
@@ -2505,7 +2520,7 @@
     };
 
     function openDraft(){
-      if(ultimateState.perkDraftOpen||ultimateState.perkQueue<=0) return;
+      if(Game.state!=='play'||ultimateState.perkDraftOpen||ultimateState.perkQueue<=0) return;
       ultimateState.perkDraftOpen=true;
       if(Game.state==='play') Game.pause();
       const host=document.getElementById('ultimate-perk-options');
@@ -2554,12 +2569,15 @@
       ultimateState.lastPerkWave=0;
       overlay.style.display='none';
       originalStart.call(this);
+      // Some modes (notably Veteran Survival) begin on a milestone wave.
+      // Wait until the base start has entered gameplay before showing the draft.
+      if(ultimateState.perkQueue>0) openDraft();
     };
     const originalSpawnWave=Game.spawnWave;
     Game.spawnWave=function(){
       originalSpawnWave.call(this);
       const wave=Number(this.wave)||0;
-      if(wave>0&&wave%10===0&&ultimateState.lastPerkWave!==wave){
+      if(wave>0&&wave%30===10&&ultimateState.lastPerkWave!==wave){
         ultimateState.lastPerkWave=wave;
         ultimateState.queuePerkDraft();
       }
