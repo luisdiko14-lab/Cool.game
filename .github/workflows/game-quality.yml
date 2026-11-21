@@ -45,7 +45,7 @@ jobs:
       - name: Install project and quality tools
         id: install
         continue-on-error: true
-        run: python -m pip install -r requirements.txt ruff coverage bandit groq
+        run: python -m pip install -r requirements.txt ruff coverage bandit
 
       - name: Run Python quality suite
         id: suite
@@ -301,8 +301,8 @@ jobs:
             exit 1
           fi
 
-  groq-ai-repair:
-    name: Groq AI bug analysis and verified repair PR
+  gemini-ai-repair:
+    name: Gemini AI bug analysis and verified repair PR
     needs:
       - python-quality
       - javascript-quality
@@ -320,8 +320,8 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      GROQ_API: ${{ secrets.GROQ_API }}
-      GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
+      GEMINI_API: ${{ secrets.GEMINI_API || secrets.GEMINI_SECRET || secrets.GOOGLE_API_KEY }}
+      GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Check out trusted main revision
@@ -341,7 +341,7 @@ jobs:
           node-version: "22"
 
       - name: Install repair validation tools
-        run: python -m pip install -r requirements.txt ruff coverage bandit
+        run: python -m pip install -r requirements.txt ruff coverage bandit google-genai
 
       - name: Download quality diagnostics
         uses: actions/download-artifact@v4
@@ -351,14 +351,14 @@ jobs:
           merge-multiple: true
         continue-on-error: true
 
-      - name: Skip AI repair when GROQ_API is not configured
-        if: env.GROQ_API == ''
+      - name: Skip AI repair when GEMINI_API is not configured
+        if: env.GEMINI_API == ''
         run: |
-          echo "No GROQ_API repository secret is configured; AI analysis was skipped." > ai-repair-report.md
-          echo "Add the repository Actions secret named GROQ_API to enable Groq analysis."
+          echo "No GEMINI_API, GEMINI_SECRET, or GOOGLE_API_KEY repository secret is configured; AI analysis was skipped." > ai-repair-report.md
+          echo "Add a repository Actions secret named GEMINI_API or GEMINI_SECRET to enable Gemini analysis."
 
-      - name: Ask Groq to diagnose failures and propose a patch
-        if: env.GROQ_API != ''
+      - name: Ask Gemini to diagnose failures and propose a patch
+        if: env.GEMINI_API != ''
         shell: bash
         run: |
           python - <<'PY'
@@ -368,7 +368,8 @@ jobs:
           import subprocess
           import sys
           from pathlib import Path
-          from groq import Groq, APIStatusError, APIConnectionError
+          from google import genai
+          from google.genai import types
 
           report = Path("ai-repair-report.md")
           diagnostic_files = sorted(Path("diagnostics").glob("**/*.log"))
@@ -423,81 +424,59 @@ jobs:
               "DIAGNOSTICS:\n" + diagnostics + "\n\nSOURCE CONTEXT:\n" + source_context
           )
           try:
-              # Official SDK uses a standard client User-Agent instead of urllib's generic one.
-              client = Groq(
-                  api_key=os.environ["GROQ_API"],
-                  timeout=150.0,
-                  max_retries=2,
-                  default_headers={"User-Agent": "CoolGame-GitHubActions/1.0"},
+              client = genai.Client(api_key=os.environ["GEMINI_API"])
+              response = client.models.generate_content(
+                  model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
+                  contents=user_prompt,
+                  config=types.GenerateContentConfig(
+                      system_instruction=system_prompt,
+                      temperature=0.1,
+                      max_output_tokens=8192,
+                      response_mime_type="application/json",
+                  ),
               )
-              completion = client.chat.completions.create(
-                  model=os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
-                  messages=[
-                      {"role": "system", "content": system_prompt},
-                      {"role": "user", "content": user_prompt},
-                  ],
-                  temperature=0.1,
-                  max_completion_tokens=8192,
-                  response_format={"type": "json_object"},
-              )
-              message = completion.choices[0].message.content
-          except APIStatusError as exc:
-              status = getattr(exc, "status_code", "unknown")
-              response = getattr(exc, "response", None)
-              detail = ""
-              if response is not None:
-                  try:
-                      detail = response.text[:3000]
-                  except Exception:
-                      detail = str(exc)[:1000]
-              if "1010" in detail or "error code: 1010" in detail.lower():
-                  diagnosis = (
-                      "Cloudflare blocked this GitHub Actions runner (error 1010). "
-                      "This is an edge/firewall denial, not evidence that the API key is invalid. "
-                      "A different runner/network or Groq support review may be required."
-                  )
-              elif status == 401:
-                  diagnosis = "Groq rejected authentication (401). Check that GROQ_API contains a valid Groq key."
-              elif status == 403:
-                  diagnosis = "Groq denied access (403). Check project permissions and model access."
+              message = response.text
+              if not message:
+                  raise RuntimeError("Gemini returned an empty response.")
+          except Exception as exc:
+              error_text = str(exc)[:3000]
+              status = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+              try:
+                  status = int(status) if status is not None else None
+              except (TypeError, ValueError):
+                  status = None
+              if status == 400:
+                  diagnosis = "Gemini rejected the request (400). Check model availability and request limits."
+              elif status in (401, 403):
+                  diagnosis = "Gemini denied API access. Verify the Gemini API key and Google AI Studio access."
               elif status == 404:
-                  diagnosis = "Endpoint or model not found (404). Check GROQ_MODEL."
+                  diagnosis = "Gemini model was not found. Set GEMINI_MODEL to a model available to your key."
               elif status == 429:
-                  diagnosis = "Groq rate limit or quota reached (429). Retry later or check usage limits."
+                  diagnosis = "Gemini quota or rate limit reached (429). Check Google AI Studio usage limits."
+              elif status is not None and status >= 500:
+                  diagnosis = f"Gemini service error ({status}); retry the workflow later."
               else:
-                  diagnosis = f"Groq returned HTTP {status}."
+                  diagnosis = f"Gemini request failed ({type(exc).__name__})."
               report.write_text(
-                  "# Groq API request failed\\n\\n" + diagnosis
-                  + f"\\n\\nHTTP status: {status}\\n\\nResponse body:\\n{detail or str(exc)[:1000]}\\n",
+                  "# Gemini API request failed\\n\\n" + diagnosis
+                  + f"\\n\\nError details (API key omitted):\\n{error_text}\\n",
                   encoding="utf-8",
               )
               raise SystemExit(diagnosis)
-          except APIConnectionError as exc:
-              report.write_text(
-                  f"# Groq connection failed\\n\\n{type(exc).__name__}: {str(exc)[:1500]}\\n",
-                  encoding="utf-8",
-              )
-              raise SystemExit("Could not connect to api.groq.com; see the repair report.")
-          except Exception as exc:
-              report.write_text(
-                  f"# Groq request failed\\n\\n{type(exc).__name__}: {str(exc)[:1500]}\\n",
-                  encoding="utf-8",
-              )
-              raise SystemExit("Groq request failed; see the repair report.")
 
           try:
               if isinstance(message, list):
                   message = "".join(part.get("text", "") for part in message if isinstance(part, dict))
               answer = json.loads(message)
           except Exception as exc:
-              report.write_text(f"Could not parse Groq's JSON response: {exc}\n", encoding="utf-8")
-              raise SystemExit("Groq returned an invalid response.")
+              report.write_text(f"Could not parse Gemini's JSON response: {exc}\n", encoding="utf-8")
+              raise SystemExit("Gemini returned an invalid response.")
 
           summary = str(answer.get("summary", "No summary supplied.")).strip()[:3000]
           patch = str(answer.get("patch", "")).strip()
-          report.write_text(f"# Groq AI repair report\n\n{summary}\n", encoding="utf-8")
+          report.write_text(f"# Gemini AI repair report\n\n{summary}\n", encoding="utf-8")
           if not patch:
-              print("Groq did not identify a safe, evidence-backed patch. No files were changed.")
+              print("Gemini did not identify a safe, evidence-backed patch. No files were changed.")
               raise SystemExit(0)
 
           fence = chr(96) * 3
@@ -505,7 +484,7 @@ jobs:
               patch = re.sub(r"^" + fence + r"(?:diff)?\s*", "", patch)
               patch = re.sub(r"\s*" + fence + r"$", "", patch)
           if len(patch) > 100000 or "\x00" in patch:
-              raise SystemExit("Groq patch exceeded safety limits.")
+              raise SystemExit("Gemini patch exceeded safety limits.")
           headers = re.findall(r"^diff --git a/(.+?) b/(.+)$", patch, flags=re.MULTILINE)
           allowed = {
               "auth.py",
@@ -516,12 +495,12 @@ jobs:
               "neon_swarm_apex.js",
           }
           if not headers:
-              raise SystemExit("Groq did not return a valid git diff.")
+              raise SystemExit("Gemini did not return a valid git diff.")
           for old_path, new_path in headers:
               if old_path != new_path or old_path not in allowed or not Path(old_path).is_file():
-                  raise SystemExit(f"Rejected unsafe AI patch path: {old_path} -> {new_path}")
+                  raise SystemExit(f"Rejected unsafe Gemini patch path: {old_path} -> {new_path}")
 
-          patch_path = Path(os.environ["RUNNER_TEMP"]) / "groq-repair.patch"
+          patch_path = Path(os.environ["RUNNER_TEMP"]) / "gemini-repair.patch"
           patch_path.write_text(patch + "\n", encoding="utf-8")
           subprocess.run(["git", "apply", "--check", "--whitespace=error", str(patch_path)], check=True)
           subprocess.run(["git", "apply", "--whitespace=error", str(patch_path)], check=True)
@@ -584,16 +563,16 @@ jobs:
           if any(path not in allowed for path in changed):
               raise SystemExit("Post-apply safety check found an unexpected changed path.")
 
-          branch = f"ai/groq-repair-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+          branch = f"ai/gemini-repair-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
           subprocess.run(["git", "switch", "-c", branch], check=True)
           subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
           subprocess.run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], check=True)
           subprocess.run(["git", "add", "--", *changed], check=True)
-          subprocess.run(["git", "commit", "-m", "fix: apply verified Groq quality repairs"], check=True)
+          subprocess.run(["git", "commit", "-m", "fix: apply verified Gemini quality repairs"], check=True)
           subprocess.run(["git", "push", "--set-upstream", "origin", branch], check=True)
 
           body = (
-              "## Groq-assisted quality repair\n\n"
+              "## Gemini-assisted quality repair\n\n"
               + summary
               + "\n\nThe workflow applied a constrained source-only patch and re-ran "
                 "Python lint, compilation, unit tests, coverage, Bandit, JavaScript syntax, "
@@ -604,21 +583,21 @@ jobs:
               "gh", "pr", "create",
               "--base", "main",
               "--head", branch,
-              "--title", "fix: Groq-verified quality repairs",
+              "--title", "fix: Gemini-verified quality repairs",
               "--body", body,
           ], check=True)
           report.write_text(
-              f"# Groq AI repair report\n\n{summary}\n\nValidated changes were pushed to {branch} and a pull request was opened.\n",
+              f"# Gemini AI repair report\n\n{summary}\n\nValidated changes were pushed to {branch} and a pull request was opened.\n",
               encoding="utf-8",
           )
-          print("Verified AI repair pull request created.")
+          print("Verified Gemini repair pull request created.")
           PY
 
-      - name: Upload Groq repair report
+      - name: Upload Gemini repair report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: groq-ai-repair-report
+          name: gemini-ai-repair-report
           path: ai-repair-report.md
           if-no-files-found: warn
           retention-days: 30
