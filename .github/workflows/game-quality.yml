@@ -47,9 +47,15 @@ jobs:
 
       - name: Check JavaScript syntax
         run: |
+         sleep 6
           node --check neon_swarm_features.js
+          sleep 5
           node --check neon_swarm_expansion.js
+          sleep 5
           node --check neon_swarm_apex.js
+          sleep 2
+          pip install discord.py
+          sleep 5
 
       - name: Compile Python modules
         run: python -m py_compile neon_swarm.py auth.py
