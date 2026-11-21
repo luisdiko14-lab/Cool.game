@@ -56,13 +56,17 @@ key, screen, accessibility/mobile behavior, HTML ID, and existing named JavaScri
 Do not delete, rename, stub, replace, minify, compress, or refactor existing systems.
 Implement 1-3 substantial, cohesive gameplay improvements with working integration and
 polished feedback. New modes must remain optional. Keep saves backward-compatible.
+You MUST return at least one real, safe, localized edit. Do not return an empty edits array
+just because a large feature is difficult; choose a smaller additive improvement that fits
+the supplied source and goal. Never claim a feature was added unless the replacement code
+actually implements it.
 Do not add dependencies, external assets, telemetry, secrets, fake buttons, TODOs, or stubs.
 Only edit supplied existing files: Neon Swarm.html or existing neon_swarm_*.js files.
 
 OUTPUT CONTRACT: Return ONLY one valid JSON object:
 {"summary":"brief description","edits":[{"path":"Neon Swarm.html","find":"exact source text","replace":"replacement text"}]}
 Give 1-12 localized exact-string edits. Each find string MUST be copied verbatim from the
-source and occur exactly once in that file. replace is the complete replacement for that
+source and occur exactly once in that file. The edits array MUST NOT be empty. replace is the complete replacement for that
 exact occurrence. Escape all strings as valid JSON. Do NOT output diffs, patches, full files,
 Markdown fences, or explanations. Never invent unseen anchors or symbols. If no safe change
 is possible, return {"summary":"No safe additive change","edits":[]} .
@@ -113,6 +117,7 @@ def openai_compatible(url, key, model, system, user, token_field="max_tokens"):
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
+        "response_format": {"type": "json_object"},
     }
     payload[token_field] = 8000
     result = post_json(
@@ -283,7 +288,7 @@ def main():
          os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b").strip(),
          lambda key, model: openai_compatible("https://openrouter.ai/api/v1/chat/completions", key, model, system, user)),
         ("Gemini", os.getenv("GEMINI_API_KEY", "").strip(),
-         os.getenv("GEMINI_MODEL", "gemini-3.1-flash").strip(),
+         os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip(),
          lambda key, model: gemini(key, model, system, user)),
         ("Groq", os.getenv("GROQ_API_KEY", os.getenv("GROQ_API", "")).strip(),
          os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip(),
