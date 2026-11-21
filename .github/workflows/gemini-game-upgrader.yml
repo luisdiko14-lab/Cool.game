@@ -357,10 +357,78 @@ jobs:
               text=True, capture_output=True,
           )
           if check.returncode:
-              raise SystemExit(
-                  "Generated patch did not apply cleanly; no game files were changed.\\n"
-                  + check.stderr[:3000]
+              print(
+                  "⚠️ Generated diff is malformed or does not match the checkout; "
+                  "requesting one targeted patch repair...",
+                  flush=True,
               )
+              repair_payload = {
+                  "model": model,
+                  "temperature": 0,
+                  "max_tokens": 5000,
+                  "messages": [
+                      {"role": "system", "content":
+                          "Repair a Git unified diff so that it is syntactically valid and applies "
+                          "to the supplied repository state. Output ONLY raw unified diff text. "
+                          "No JSON, Markdown fences, explanations, or apply_patch format. "
+                          "Every hunk line must begin with exactly one of space, +, or -. "
+                          "Hunk line counts must be correct. Keep diff --git, ---, +++, and @@ headers. "
+                          "Do not change the intended edits or invent code. If you cannot repair it "
+                          "safely, output exactly NO_SAFE_DIFF."},
+                      {"role": "user", "content":
+                          "The following patch failed git apply --check against the current checkout. "
+                          "Repair its syntax/context while preserving the intended changes.\n\n"
+                          "Git error:\n" + check.stderr[:3000]
+                          + "\n\nFailed patch:\n" + patch[:18000]}
+                  ],
+              }
+              repair_request = urllib.request.Request(
+                  "https://openrouter.ai/api/v1/chat/completions",
+                  data=json.dumps(repair_payload).encode("utf-8"),
+                  headers={
+                      "Authorization": "Bearer " + api_key,
+                      "Content-Type": "application/json",
+                      "User-Agent": "Cool-game-OpenRouter-Upgrader",
+                  },
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(repair_request, timeout=240) as response:
+                      repair_api = json.loads(response.read().decode("utf-8"))
+                  repair_choices = repair_api.get("choices") or []
+                  repaired_patch = (
+                      (repair_choices[0].get("message") or {}).get("content")
+                      if repair_choices else None
+                  )
+                  if not isinstance(repaired_patch, str) or not repaired_patch.strip():
+                      raise ValueError("Patch repair returned an empty response.")
+                  repaired_patch = repaired_patch.strip()
+                  repaired_patch = re.sub(r"^\\s*\x60\x60\x60(?:diff)?\\s*\\n", "", repaired_patch, flags=re.IGNORECASE)
+                  repaired_patch = re.sub(r"\\n?\x60\x60\x60\\s*$", "", repaired_patch)
+                  match = re.search(r"(?m)^diff --git ", repaired_patch)
+                  if not match:
+                      raise ValueError("Repair response did not contain a diff header.")
+                  patch = repaired_patch[match.start():].strip()
+                  if "\\n--- " not in patch or "\\n+++ " not in patch:
+                      raise ValueError("Repaired patch is missing --- or +++ file headers.")
+                  if len(patch.encode("utf-8")) > 20_000:
+                      raise ValueError("Repaired patch exceeded the 20 KB safety limit.")
+                  patch_file.write_text(patch, encoding="utf-8")
+                  repaired_check = subprocess.run(
+                      ["git", "apply", "--check", str(patch_file)],
+                      text=True, capture_output=True,
+                  )
+                  if repaired_check.returncode:
+                      raise ValueError(
+                          "Repaired patch still fails git apply --check: "
+                          + repaired_check.stderr[:2000]
+                      )
+                  print("✅ Repaired unified diff passed git apply --check.", flush=True)
+              except Exception as repair_error:
+                  raise SystemExit(
+                      "Generated patch failed validation and the one repair attempt failed; "
+                      "no game files were modified. " + str(repair_error)
+                  ) from repair_error
           subprocess.run(["git", "apply", str(patch_file)], check=True)
           changed_names = sorted(set(
               subprocess.check_output(
