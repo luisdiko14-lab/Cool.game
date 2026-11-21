@@ -1,25 +1,25 @@
-name: Groq Llama Game Upgrader
+name: Groq Game Upgrader
 
 on:
   workflow_dispatch:
     inputs:
       goal:
-        description: "What should Llama improve or add to Neon Swarm?"
+        description: "What should the Groq model improve or add to Neon Swarm?"
         required: true
         type: string
         default: "Add 1-3 substantial gameplay features to Neon Swarm. Keep every existing mechanic and screen intact; additions only."
       model:
-        description: "Use auto to select a Llama model available to your Groq API key"
+        description: "Use auto to select a code-generation model available to your Groq API key"
         required: false
         type: string
-        default: "llama-3.1-8b-instant"
+        default: "openai/gpt-oss-120b"
 
 permissions:
   contents: write
   pull-requests: write
 
 concurrency:
-  group: groq-llama-game-upgrader-${{ github.ref }}
+  group: groq-game-upgrader-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -52,10 +52,10 @@ jobs:
           fi
           python -m pip install ruff coverage bandit
 
-      - name: Generate game improvements with Groq Llama
+      - name: Generate game improvements with Groq
         env:
           GROQ_API: ${{ secrets.GROQ_API }}
-          GROQ_MODEL: ${{ inputs.model || 'llama-3.1-8b-instant' }}
+          GROQ_MODEL: ${{ inputs.model || 'openai/gpt-oss-120b' }}
           UPGRADE_GOAL: ${{ inputs.goal }}
         run: |
           if [ -z "$GROQ_API" ]; then
@@ -149,13 +149,13 @@ jobs:
           requested_model = os.environ.get("GROQ_MODEL", "auto").strip()
           api_key = os.environ["GROQ_API"]
 
-          # Model availability is account-specific. Discover models using this key
-          # instead of assuming a retired or restricted model ID is accessible.
+          # Model availability is account-specific. Select a model that this key
+          # can actually access and that is suitable for text/code generation.
           models_request = urllib.request.Request(
               "https://api.groq.com/openai/v1/models",
               headers={
                   "Authorization": "Bearer " + api_key,
-                  "User-Agent": "Cool-game-Groq-Llama-Upgrader",
+                  "User-Agent": "Cool-game-Groq-Upgrader",
               },
               method="GET",
           )
@@ -173,45 +173,41 @@ jobs:
               for item in models_result.get("data", [])
               if isinstance(item, dict) and isinstance(item.get("id"), str)
           )
-          # Prompt Guard/classifier IDs contain "llama" but cannot generate game code.
-          # Exclude them and never fall back to a safety classifier.
-          llama_ids = [
+          # Exclude audio, transcription, moderation, and safety-only models.
+          blocked_markers = (
+              "prompt-guard", "safeguard", "guard", "whisper",
+              "orpheus", "allam",
+          )
+          generation_ids = [
               model_id for model_id in available_ids
-              if "llama" in model_id.lower()
-              and not any(
-                  blocked in model_id.lower()
-                  for blocked in ("prompt-guard", "safeguard", "guard")
-              )
+              if not any(marker in model_id.lower() for marker in blocked_markers)
           ]
-          if not llama_ids:
+          if not generation_ids:
               visible = ", ".join(available_ids[:30]) or "(none returned)"
               raise SystemExit(
-                  "This GROQ_API key has no usable Llama chat-generation models. "
-                  "Groq's model list for this key contains: " + visible
-                  + ". Prompt Guard/classifier models cannot generate game code. "
-                  "Enable/access a Llama chat model in GroqCloud or use an API key "
-                  "with access to one."
+                  "This GROQ_API key has no supported text-generation models. "
+                  "Models returned: " + visible
               )
 
           if requested_model.lower() == "auto":
               preferred = [
-                  "llama-3.1-8b-instant",
-                  "llama-3.3-70b-versatile",
+                  "openai/gpt-oss-120b",
+                  "openai/gpt-oss-20b",
+                  "qwen/qwen3.8-27b",
               ]
               model = next(
-                  (candidate for candidate in preferred if candidate in llama_ids),
-                  llama_ids[0],
+                  (candidate for candidate in preferred if candidate in generation_ids),
+                  generation_ids[0],
               )
-          elif requested_model in llama_ids:
+          elif requested_model in generation_ids:
               model = requested_model
           else:
-              visible = ", ".join(llama_ids)
+              visible = ", ".join(generation_ids)
               raise SystemExit(
-                  f"Requested Llama model {requested_model!r} is not available "
-                  f"for code generation with this GROQ_API key. Usable Llama "
-                  f"models returned: {visible}. Select one of those models in "
-                  "the workflow input. The workflow will not silently substitute "
-                  "a different model."
+                  f"Requested model {requested_model!r} is not available for "
+                  f"text generation with this GROQ_API key. Usable models "
+                  f"returned: {visible}. Select one of those models in the "
+                  "workflow input. No automatic model substitution will occur."
               )
 
           payload = {
@@ -232,7 +228,7 @@ jobs:
               headers={
                   "Authorization": "Bearer " + api_key,
                   "Content-Type": "application/json",
-                  "User-Agent": "Cool-game-Groq-Llama-Upgrader",
+                  "User-Agent": "Cool-game-Groq-the model-Upgrader",
               },
               method="POST",
           )
@@ -252,8 +248,8 @@ jobs:
               raise SystemExit("Groq returned no completion choices.")
           response_text = (choices[0].get("message") or {}).get("content")
           if not isinstance(response_text, str) or not response_text.strip():
-              raise SystemExit("Llama returned an empty response.")
-          print("🤖 Llama response received; validating structured output...", flush=True)
+              raise SystemExit("Model returned an empty response.")
+          print("🤖 Model response received; validating structured output...", flush=True)
 
           try:
               result = json.loads(response_text)
@@ -261,14 +257,14 @@ jobs:
               preview = response_text[max(0, exc.pos - 300):exc.pos + 300]
               print("Malformed Llama JSON excerpt:")
               print(preview)
-              raise SystemExit("Llama returned malformed JSON; no files were modified.") from exc
+              raise SystemExit("Model returned malformed JSON; no files were modified.") from exc
 
           if not isinstance(result, dict):
-              raise SystemExit("Llama returned an unexpected structured response type.")
+              raise SystemExit("Model returned an unexpected structured response type.")
           summary = str(result.get("summary", "")).strip()
           files = result.get("files")
           if not isinstance(files, list):
-              raise SystemExit("Llama response did not contain a files array.")
+              raise SystemExit("Model response did not contain a files array.")
 
           baseline_html = subprocess.check_output(
               ["git", "show", "origin/main:Neon Swarm.html"],
@@ -290,7 +286,7 @@ jobs:
           total_bytes = 0
           for item in files:
               if not isinstance(item, dict):
-                  raise SystemExit("Llama returned an invalid file entry.")
+                  raise SystemExit("Model returned an invalid file entry.")
               name = item.get("path")
               body = item.get("content")
               if not isinstance(name, str) or not allowed(name):
@@ -301,7 +297,7 @@ jobs:
                   raise SystemExit(f"Rejected binary content in {name}")
               total_bytes += len(body.encode("utf-8"))
               if total_bytes > 100_000:
-                  raise SystemExit("Llama output exceeded the 100 KB safety limit.")
+                  raise SystemExit("Model output exceeded the 100 KB safety limit.")
               path = root / name
 
               if name == "Neon Swarm.html":
@@ -352,7 +348,7 @@ jobs:
                   added_functions = sorted(generated_functions - baseline_functions)
                   if body == baseline_html:
                       raise SystemExit(
-                          "FEATURE-PRESERVATION BLOCK: Llama returned the unchanged "
+                          "FEATURE-PRESERVATION BLOCK: Model returned the unchanged "
                           "baseline game; no gameplay or UI improvement was made."
                       )
                   print(
@@ -369,16 +365,16 @@ jobs:
               changed.append(name)
 
           if not changed:
-              Path("llama-upgrade-summary.md").write_text(
-                  "# Groq Llama Game Upgrade\n\n"
+              Path("groq-upgrade-summary.md").write_text(
+                  "# Groq Game Upgrade\n\n"
                   + (summary or "No changes were generated.") + "\n",
                   encoding="utf-8",
               )
-              print("Llama proposed no game file changes.")
+              print("Model proposed no game file changes.")
               raise SystemExit(2)
 
-          Path("llama-upgrade-summary.md").write_text(
-              "# Groq Llama Game Upgrade\n\n"
+          Path("groq-upgrade-summary.md").write_text(
+              "# Groq Game Upgrade\n\n"
               + (summary or "Gameplay improvements generated.")
               + "\n\nChanged files:\n"
               + "".join(f"- {name}\n" for name in changed),
@@ -418,20 +414,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BRANCH="ai/llama-game-upgrade-${GITHUB_RUN_ID}"
+          BRANCH="ai/groq-game-upgrade-${GITHUB_RUN_ID}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$BRANCH"
           git add -- 'Neon Swarm.html' 'neon_swarm.py' 'neon_swarm_*.js'
-          git commit -m "feat: Llama-generated game improvements"
+          git commit -m "feat: AI-generated game improvements"
           git push --set-upstream origin "$BRANCH"
           echo "Pushed upgrade branch: $BRANCH"
           echo "PR URL: https://github.com/${GITHUB_REPOSITORY}/pull/new/${BRANCH}"
           if ! gh pr create \
             --base main \
             --head "$BRANCH" \
-            --title "feat: Llama game improvements" \
-            --body-file llama-upgrade-summary.md; then
+            --title "feat: Groq game improvements" \
+            --body-file groq-upgrade-summary.md; then
             echo "::warning::The branch was pushed, but GitHub Actions is not permitted to create pull requests."
             echo "Enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests, or open the PR using the URL above."
           fi
@@ -440,7 +436,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: llama-game-upgrade-summary
-          path: llama-upgrade-summary.md
+          name: groq-game-upgrade-summary
+          path: groq-upgrade-summary.md
           if-no-files-found: ignore
           retention-days: 30
