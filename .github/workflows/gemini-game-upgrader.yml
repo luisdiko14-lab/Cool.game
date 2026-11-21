@@ -1,18 +1,18 @@
-name: Gemini Game Upgrader
+name: Groq Llama Game Upgrader
 
 on:
   workflow_dispatch:
     inputs:
       goal:
-        description: "What should Gemini improve or add to Neon Swarm?"
+        description: "What should Llama improve or add to Neon Swarm?"
         required: true
         type: string
         default: "Add 1-3 substantial gameplay features to Neon Swarm. Keep every existing mechanic and screen intact; additions only."
       model:
-        description: "Gemini model ID (default is stable Gemini 3.1 Flash-Lite; automatically falls back if unavailable)"
+        description: "Groq Llama model ID (default: llama-3.3-70b-versatile)"
         required: false
         type: string
-        default: "gemini-3.1-flash-lite"
+        default: "llama-3.3-70b-versatile"
 
 permissions:
   contents: write
@@ -50,16 +50,16 @@ jobs:
           if [ -f requirements.txt ]; then
             python -m pip install -r requirements.txt
           fi
-          python -m pip install google-genai ruff coverage bandit
+          python -m pip install ruff coverage bandit
 
-      - name: Generate game improvements with Gemini
+      - name: Generate game improvements with Groq Llama
         env:
-          GEMINI_API: ${{ secrets.GEMINI_API || secrets.GEMINI_SECRET || secrets.GOOGLE_API_KEY }}
-          GEMINI_MODEL: ${{ inputs.model || 'gemini-3.1-flash-lite' }}
+          GROQ_API: ${{ secrets.GROQ_API }}
+          GROQ_MODEL: ${{ inputs.model || 'llama-3.3-70b-versatile' }}
           UPGRADE_GOAL: ${{ inputs.goal }}
         run: |
-          if [ -z "$GEMINI_API" ]; then
-            echo "::error::Add GEMINI_API (or GEMINI_SECRET / GOOGLE_API_KEY) in repository Actions secrets."
+          if [ -z "$GROQ_API" ]; then
+            echo "::error::Add GROQ_API in repository Actions secrets (Groq API key)."
             exit 1
           fi
 
@@ -68,16 +68,13 @@ jobs:
           import os
           import re
           import subprocess
+          import urllib.error
+          import urllib.request
           from difflib import SequenceMatcher
           from pathlib import Path
-          from google import genai
-          from google.genai import types
 
           root = Path(".")
-          allowed_exact = {
-              "Neon Swarm.html",
-              "neon_swarm.py",
-          }
+          allowed_exact = {"Neon Swarm.html", "neon_swarm.py"}
 
           def allowed(path: str) -> bool:
               p = Path(path)
@@ -149,133 +146,66 @@ jobs:
           if not goal:
               raise SystemExit("The upgrade goal cannot be empty.")
 
-          client = genai.Client(
-              api_key=os.environ["GEMINI_API"],
-              http_options=types.HttpOptions(api_version="v1beta"),
-          )
-          output_schema = types.Schema(
-              type=types.Type.OBJECT,
-              properties={
-                  "summary": types.Schema(type=types.Type.STRING),
-                  "files": types.Schema(
-                      type=types.Type.ARRAY,
-                      items=types.Schema(
-                          type=types.Type.OBJECT,
-                          properties={
-                              "path": types.Schema(type=types.Type.STRING),
-                              "content": types.Schema(type=types.Type.STRING),
-                          },
-                          required=["path", "content"],
-                      ),
-                  ),
+          model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
+          if not model.startswith("llama-"):
+              raise SystemExit("Only Groq-hosted Llama models are allowed for this workflow.")
+
+          payload = {
+              "model": model,
+              "temperature": 0.25,
+              "max_completion_tokens": 16000,
+              "response_format": {"type": "json_object"},
+              "messages": [
+                  {"role": "system", "content": system},
+                  {"role": "user", "content":
+                      "UPGRADE REQUEST:\\n" + goal
+                      + "\\n\\nCURRENT REPOSITORY SOURCE:\\n" + "".join(context)}
+              ],
+          }
+          request = urllib.request.Request(
+              "https://api.groq.com/openai/v1/chat/completions",
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Authorization": "Bearer " + os.environ["GROQ_API"],
+                  "Content-Type": "application/json",
+                  "User-Agent": "Cool-game-Groq-Llama-Upgrader",
               },
-              required=["summary", "files"],
+              method="POST",
           )
 
-          selected_model = os.environ["GEMINI_MODEL"].strip()
-          # A 503 is a capacity problem: switch models immediately rather than
-          # retrying the same unavailable endpoint for several minutes.
-          model_candidates = list(dict.fromkeys([
-              selected_model,
-              "gemini-3.1-flash-lite",
-              "gemini-2.5-flash",
-          ]))
+          print(f"🤖 Sending upgrade request to Groq using {model}...", flush=True)
+          try:
+              with urllib.request.urlopen(request, timeout=240) as response:
+                  api_result = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              details = exc.read().decode("utf-8", errors="replace")[:3000]
+              raise SystemExit(f"Groq API returned HTTP {exc.code}: {details}") from exc
+          except Exception as exc:
+              raise SystemExit(f"Groq request failed: {exc}") from exc
 
-          request_contents = (
-              "UPGRADE REQUEST:\\n" + goal
-              + "\\n\\nCURRENT REPOSITORY SOURCE:\\n"
-              + "".join(context)
-          )
-          response = None
-          last_error = None
+          choices = api_result.get("choices") or []
+          if not choices:
+              raise SystemExit("Groq returned no completion choices.")
+          response_text = (choices[0].get("message") or {}).get("content")
+          if not isinstance(response_text, str) or not response_text.strip():
+              raise SystemExit("Llama returned an empty response.")
+          print("🤖 Llama response received; validating structured output...", flush=True)
 
-          for model_index, model_name in enumerate(model_candidates):
-              print(f"🤖 Trying Gemini model: {model_name}", flush=True)
-              for attempt in range(2):
-                  try:
-                      response = client.models.generate_content(
-                          model=model_name,
-                          contents=request_contents,
-                          config=types.GenerateContentConfig(
-                              system_instruction=system,
-                              max_output_tokens=60000,
-                              response_mime_type="application/json",
-                              response_schema=output_schema,
-                          ),
-                      )
-                      print(f"🤖 Response received from {model_name}.", flush=True)
-                      break
-                  except Exception as exc:
-                      last_error = exc
-                      message = str(exc)
-                      unavailable = "503" in message or "UNAVAILABLE" in message
-                      retryable = any(
-                          marker in message
-                          for marker in ("429", "500", "502", "504",
-                                         "RESOURCE_EXHAUSTED")
-                      )
+          try:
+              result = json.loads(response_text)
+          except json.JSONDecodeError as exc:
+              preview = response_text[max(0, exc.pos - 300):exc.pos + 300]
+              print("Malformed Llama JSON excerpt:")
+              print(preview)
+              raise SystemExit("Llama returned malformed JSON; no files were modified.") from exc
 
-                      if unavailable:
-                          if model_index + 1 < len(model_candidates):
-                              print(
-                                  f"⚠️ {model_name} is overloaded (503). "
-                                  f"Switching immediately to {model_candidates[model_index + 1]}.",
-                                  flush=True,
-                              )
-                              break
-                          raise
-
-                      if retryable and attempt == 0:
-                          delay = 8
-                          print(
-                              f"⚠️ Temporary API error from {model_name}; "
-                              f"one retry in {delay}s: {message}",
-                              flush=True,
-                          )
-                          time.sleep(delay)
-                          continue
-
-                      if model_index + 1 < len(model_candidates):
-                          print(
-                              f"⚠️ {model_name} failed; trying fallback "
-                              f"{model_candidates[model_index + 1]}: {message}",
-                              flush=True,
-                          )
-                          break
-                      raise
-
-              if response is not None:
-                  break
-
-          if response is None:
-              raise SystemExit(
-                  "All Gemini models failed. Last error: " + str(last_error)
-              )
-          if not response.text:
-              raise SystemExit("Gemini returned an empty response.")
-
-          print("🤖 Gemini response received; validating structured output...")
-          result = response.parsed
-          if result is None:
-              try:
-                  result = json.loads(response.text)
-              except json.JSONDecodeError as exc:
-                  preview = response.text[max(0, exc.pos - 300):exc.pos + 300]
-                  print(f"Gemini JSON parsing failed at line {exc.lineno}, column {exc.colno}.")
-                  print("Malformed response excerpt:")
-                  print(preview)
-                  raise SystemExit(
-                      "Gemini returned malformed or truncated JSON. "
-                      "Structured response parsing also failed; no files were modified."
-                  ) from exc
           if not isinstance(result, dict):
-              raise SystemExit("Gemini returned an unexpected structured response type.")
+              raise SystemExit("Llama returned an unexpected structured response type.")
           summary = str(result.get("summary", "")).strip()
           files = result.get("files")
           if not isinstance(files, list):
-              raise SystemExit("Gemini response did not contain a files array.")
+              raise SystemExit("Llama response did not contain a files array.")
 
-          # Load the exact main-branch baseline. The generated game must extend this version.
           baseline_html = subprocess.check_output(
               ["git", "show", "origin/main:Neon Swarm.html"],
               text=True,
@@ -283,12 +213,12 @@ jobs:
           )
           baseline_lines = baseline_html.splitlines()
           baseline_ids = set(re.findall(
-              r"""\bid\s*=\s*["']([^"']+)["']""",
+              r"""\\bid\\s*=\\s*["']([^"']+)["']""",
               baseline_html,
               re.IGNORECASE,
           ))
           baseline_functions = set(re.findall(
-              r"""\bfunction\s+([A-Za-z_$][\w$]*)\s*\(""",
+              r"""\\bfunction\\s+([A-Za-z_$][\\w$]*)\\s*\\(""",
               baseline_html,
           ))
 
@@ -296,7 +226,7 @@ jobs:
           total_bytes = 0
           for item in files:
               if not isinstance(item, dict):
-                  raise SystemExit("Gemini returned an invalid file entry.")
+                  raise SystemExit("Llama returned an invalid file entry.")
               name = item.get("path")
               body = item.get("content")
               if not isinstance(name, str) or not allowed(name):
@@ -305,10 +235,9 @@ jobs:
                   raise SystemExit(f"Rejected empty or invalid file: {name}")
               if "\\x00" in body:
                   raise SystemExit(f"Rejected binary content in {name}")
-              encoded_size = len(body.encode("utf-8"))
-              total_bytes += encoded_size
+              total_bytes += len(body.encode("utf-8"))
               if total_bytes > 100_000:
-                  raise SystemExit("Gemini output exceeded the 100 KB safety limit.")
+                  raise SystemExit("Llama output exceeded the 100 KB safety limit.")
               path = root / name
 
               if name == "Neon Swarm.html":
@@ -324,64 +253,50 @@ jobs:
                   max_removed_lines = max(10, int(len(baseline_lines) * 0.08))
                   if removed_lines > max_removed_lines:
                       raise SystemExit(
-                          "FEATURE-PRESERVATION BLOCK: Gemini removed or rewrote "
+                          "FEATURE-PRESERVATION BLOCK: Llama removed or rewrote "
                           f"{removed_lines} existing lines; maximum allowed is "
-                          f"{max_removed_lines} ({len(baseline_lines)} baseline lines). "
-                          "No generated files were accepted."
+                          f"{max_removed_lines} ({len(baseline_lines)} baseline lines)."
                       )
-
                   min_lines = int(len(baseline_lines) * 0.92)
                   if len(generated_lines) < min_lines:
                       raise SystemExit(
                           "FEATURE-PRESERVATION BLOCK: generated HTML has "
-                          f"{len(generated_lines)} lines; at least {min_lines} are "
-                          "required to prevent replacing the existing game."
+                          f"{len(generated_lines)} lines; at least {min_lines} required."
                       )
-
                   generated_ids = set(re.findall(
-                      r"""\bid\s*=\s*["']([^"']+)["']""",
+                      r"""\\bid\\s*=\\s*["']([^"']+)["']""",
                       body,
                       re.IGNORECASE,
                   ))
                   missing_ids = sorted(baseline_ids - generated_ids)
                   if missing_ids:
                       raise SystemExit(
-                          "FEATURE-PRESERVATION BLOCK: existing UI element IDs were "
-                          "removed: " + ", ".join(missing_ids[:30])
+                          "FEATURE-PRESERVATION BLOCK: existing UI IDs were removed: "
+                          + ", ".join(missing_ids[:30])
                       )
-
                   generated_functions = set(re.findall(
-                      r"""\bfunction\s+([A-Za-z_$][\w$]*)\s*\(""",
+                      r"""\\bfunction\\s+([A-Za-z_$][\\w$]*)\\s*\\(""",
                       body,
                   ))
-                  missing_functions = sorted(
-                      baseline_functions - generated_functions
-                  )
+                  missing_functions = sorted(baseline_functions - generated_functions)
                   if missing_functions:
                       raise SystemExit(
                           "FEATURE-PRESERVATION BLOCK: existing game functions were "
                           "removed or renamed: " + ", ".join(missing_functions)
                       )
-
                   added_ids = sorted(generated_ids - baseline_ids)
                   added_functions = sorted(generated_functions - baseline_functions)
-
-                  # Refinements can improve existing UI/behavior without adding a
-                  # new ID or function (for example, reducing popup frequency).
-                  # Existing IDs/functions and the deletion budget above stay strict.
                   if body == baseline_html:
                       raise SystemExit(
-                          "FEATURE-PRESERVATION BLOCK: Gemini returned the unchanged "
+                          "FEATURE-PRESERVATION BLOCK: Llama returned the unchanged "
                           "baseline game; no gameplay or UI improvement was made."
                       )
-
                   print(
                       "Feature audit passed: "
-                      f"{len(baseline_ids)} existing IDs retained, "
-                      f"{len(baseline_functions)} existing functions retained, "
-                      f"{len(added_ids)} new IDs and "
-                      f"{len(added_functions)} new named functions; "
-                      "existing-feature refinements are allowed."
+                      f"{len(baseline_ids)} existing IDs and "
+                      f"{len(baseline_functions)} existing functions retained; "
+                      f"{len(added_ids)} new IDs and {len(added_functions)} new functions. "
+                      "Existing-feature refinements are allowed."
                   )
 
               if path.exists() and path.read_text(encoding="utf-8") == body:
@@ -390,21 +305,24 @@ jobs:
               changed.append(name)
 
           if not changed:
-              Path("gemini-upgrade-summary.md").write_text(
-                  "# Gemini Game Upgrade\\n\\n" + (summary or "No changes were generated.") + "\\n",
+              Path("llama-upgrade-summary.md").write_text(
+                  "# Groq Llama Game Upgrade\\n\\n"
+                  + (summary or "No changes were generated.") + "\\n",
                   encoding="utf-8",
               )
-              print("Gemini proposed no game file changes.")
+              print("Llama proposed no game file changes.")
               raise SystemExit(2)
 
-          Path("gemini-upgrade-summary.md").write_text(
-              "# Gemini Game Upgrade\\n\\n" + (summary or "Gameplay improvements generated.") +
-              "\\n\\nChanged files:\\n" + "".join(f"- {name}\\n" for name in changed),
+          Path("llama-upgrade-summary.md").write_text(
+              "# Groq Llama Game Upgrade\\n\\n"
+              + (summary or "Gameplay improvements generated.")
+              + "\\n\\nChanged files:\\n"
+              + "".join(f"- {name}\\n" for name in changed),
               encoding="utf-8",
           )
           print(summary)
           print("Changed files:", ", ".join(changed))
-          PY
+          PYY
 
       - name: Validate generated game changes
         run: |
@@ -436,20 +354,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BRANCH="ai/gemini-game-upgrade-${GITHUB_RUN_ID}"
+          BRANCH="ai/llama-game-upgrade-${GITHUB_RUN_ID}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$BRANCH"
           git add -- 'Neon Swarm.html' 'neon_swarm.py' 'neon_swarm_*.js'
-          git commit -m "feat: Gemini-generated game improvements"
+          git commit -m "feat: Llama-generated game improvements"
           git push --set-upstream origin "$BRANCH"
           echo "Pushed upgrade branch: $BRANCH"
           echo "PR URL: https://github.com/${GITHUB_REPOSITORY}/pull/new/${BRANCH}"
           if ! gh pr create \
             --base main \
             --head "$BRANCH" \
-            --title "feat: Gemini game improvements" \
-            --body-file gemini-upgrade-summary.md; then
+            --title "feat: Llama game improvements" \
+            --body-file llama-upgrade-summary.md; then
             echo "::warning::The branch was pushed, but GitHub Actions is not permitted to create pull requests."
             echo "Enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests, or open the PR using the URL above."
           fi
@@ -459,6 +377,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gemini-game-upgrade-summary
-          path: gemini-upgrade-summary.md
+          path: llama-upgrade-summary.md
           if-no-files-found: ignore
           retention-days: 30
