@@ -44,6 +44,8 @@ jobs:
           --collect-all cryptography
           --name NeonSwarm
           --add-data "neon_swarm_features.js;."
+          --add-data "neon_swarm_expansion.js;."
+          --add-data "neon_swarm_apex.js;."
           --add-data "Raya(Slowed).mp3;."
           neon_swarm.py
 
