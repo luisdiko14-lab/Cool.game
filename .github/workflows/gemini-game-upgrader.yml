@@ -209,9 +209,10 @@ jobs:
 
           def parse_model_json(text):
               candidate = text.strip()
-              if candidate.startswith("\`\`\`"):
-                  candidate = re.sub(r"^\\\`\\\`\\\`(?:json)?\\s*", "", candidate, flags=re.I)
-                  candidate = re.sub(r"\\s*\\\`\\\`\\\`$", "", candidate)
+              if candidate.startswith("```"):
+                  candidate = candidate.split("\n", 1)[1] if "\n" in candidate else candidate[3:]
+              if candidate.endswith("```"):
+                  candidate = candidate[:-3].rstrip()
               return json.loads(candidate)
 
           try:
