@@ -12,7 +12,7 @@ on:
         description: "Gemini model ID (default is the free-tier Gemini 3.1 Flash-Lite)"
         required: false
         type: string
-        default: "gemini-3.1-flash-lite"
+        default: "gemini-3.8-flash"
 
 permissions:
   contents: write
@@ -55,7 +55,7 @@ jobs:
       - name: Generate game improvements with Gemini
         env:
           GEMINI_API: ${{ secrets.GEMINI_API || secrets.GEMINI_SECRET || secrets.GOOGLE_API_KEY }}
-          GEMINI_MODEL: ${{ inputs.model || 'gemini-3.1-flash-lite' }}
+          GEMINI_MODEL: ${{ inputs.model || 'gemini-3.8-flash' }}
           UPGRADE_GOAL: ${{ inputs.goal }}
         run: |
           if [ -z "$GEMINI_API" ]; then
@@ -181,7 +181,6 @@ jobs:
               ),
               config=types.GenerateContentConfig(
                   system_instruction=system,
-                  temperature=0.35,
                   max_output_tokens=60000,
                   response_mime_type="application/json",
                   response_schema=output_schema,
