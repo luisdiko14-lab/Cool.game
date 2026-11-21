@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -68,8 +69,7 @@ OUTPUT CONTRACT: Return ONLY one valid JSON object:
 Give 1-12 localized exact-string edits. Each find string MUST be copied verbatim from the
 source and occur exactly once in that file. The edits array MUST NOT be empty. replace is the complete replacement for that
 exact occurrence. Escape all strings as valid JSON. Do NOT output diffs, patches, full files,
-Markdown fences, or explanations. Never invent unseen anchors or symbols. If no safe change
-is possible, return {"summary":"No safe additive change","edits":[]} .
+Markdown fences, or explanations. Never invent unseen anchors or symbols. If a large feature is risky, implement a smaller safe improvement instead. Never return an empty edits array.
 """.strip()
     parts = [f"UPGRADE GOAL:\n{goal}\n", "CURRENT SOURCE FILES:"]
     budget = MAX_CONTEXT
@@ -96,8 +96,18 @@ def post_json(url, payload, headers):
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=210) as response:
-            data = response.read().decode("utf-8")
+        attempts = 3 if "/models/" in url and ":generateContent" in url else 1
+        for attempt in range(attempts):
+            try:
+                with urllib.request.urlopen(req, timeout=210) as response:
+                    data = response.read().decode("utf-8")
+                break
+            except urllib.error.HTTPError as exc:
+                if exc.code not in {429, 500, 502, 503, 504} or attempt == attempts - 1:
+                    raise
+                delay = 8 * (2 ** attempt)
+                print(f"Gemini temporary HTTP {exc.code}; retrying in {delay}s...", flush=True)
+                time.sleep(delay)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:1500]
         raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
@@ -305,7 +315,8 @@ def main():
         configured = True
         print(f"🤖 Trying {name} using {model}...", flush=True)
         try:
-            result = parse_json(generate(key, model))
+            raw = generate(key, model)
+            result = parse_json(raw)
             changes, summary = candidate(result, sources)
             for filename, body in changes.items():
                 (ROOT / filename).write_text(body, encoding="utf-8", newline="")
@@ -319,6 +330,9 @@ def main():
             message = f"{name} ({model}) failed: {type(exc).__name__}: {exc}"
             errors.append(message)
             print("⚠️ " + message, flush=True)
+            if "raw" in locals() and isinstance(raw, str):
+                excerpt = re.sub(r"\\s+", " ", raw)[:1200]
+                print(f"Model response excerpt (for diagnosis): {excerpt}", flush=True)
             print("Trying the next provider; no changes from this response were written.", flush=True)
 
     if not configured:
