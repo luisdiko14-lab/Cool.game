@@ -69,9 +69,9 @@ jobs:
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.GEMINI_API || secrets.GEMINI_SECRET || secrets.GOOGLE_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY || secrets.GROQ_SECRET }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API || secrets.GROQ_API_KEY || secrets.GROQ_SECRET }}
           OPENROUTER_MODEL: ${{ inputs.model || 'openai/gpt-oss-120b' }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.1-flash' }}
           GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-120b' }}
           UPGRADE_GOAL: ${{ inputs.goal }}
         run: python .github/scripts/ai_game_upgrader.py
