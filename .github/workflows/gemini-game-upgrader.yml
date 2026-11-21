@@ -12,7 +12,7 @@ on:
         description: "Use auto to select a Llama model available to your Groq API key"
         required: false
         type: string
-        default: "auto"
+        default: "llama-3.1-8b-instant"
 
 permissions:
   contents: write
@@ -55,7 +55,7 @@ jobs:
       - name: Generate game improvements with Groq Llama
         env:
           GROQ_API: ${{ secrets.GROQ_API }}
-          GROQ_MODEL: ${{ inputs.model || 'auto' }}
+          GROQ_MODEL: ${{ inputs.model || 'llama-3.1-8b-instant' }}
           UPGRADE_GOAL: ${{ inputs.goal }}
         run: |
           if [ -z "$GROQ_API" ]; then
@@ -173,24 +173,30 @@ jobs:
               for item in models_result.get("data", [])
               if isinstance(item, dict) and isinstance(item.get("id"), str)
           )
+          # Prompt Guard/classifier IDs contain "llama" but cannot generate game code.
+          # Exclude them and never fall back to a safety classifier.
           llama_ids = [
               model_id for model_id in available_ids
               if "llama" in model_id.lower()
+              and not any(
+                  blocked in model_id.lower()
+                  for blocked in ("prompt-guard", "safeguard", "guard")
+              )
           ]
           if not llama_ids:
               visible = ", ".join(available_ids[:30]) or "(none returned)"
               raise SystemExit(
-                  "This GROQ_API key has no Llama models available. "
+                  "This GROQ_API key has no usable Llama chat-generation models. "
                   "Groq's model list for this key contains: " + visible
-                  + ". Enable/access a Llama model in GroqCloud or use an API key "
-                  "with Llama access; this workflow will not silently switch to a "
-                  "non-Llama model."
+                  + ". Prompt Guard/classifier models cannot generate game code. "
+                  "Enable/access a Llama chat model in GroqCloud or use an API key "
+                  "with access to one."
               )
 
           if requested_model.lower() == "auto":
               preferred = [
-                  "llama-3.3-70b-versatile",
                   "llama-3.1-8b-instant",
+                  "llama-3.3-70b-versatile",
               ]
               model = next(
                   (candidate for candidate in preferred if candidate in llama_ids),
@@ -199,18 +205,13 @@ jobs:
           elif requested_model in llama_ids:
               model = requested_model
           else:
-              print(
-                  f"::warning::Requested model {requested_model!r} is not available "
-                  "to this key; selecting an available Llama model instead."
-              )
-              model = next(
-                  (
-                      candidate for candidate in [
-                          "llama-3.3-70b-versatile",
-                          "llama-3.1-8b-instant",
-                      ] if candidate in llama_ids
-                  ),
-                  llama_ids[0],
+              visible = ", ".join(llama_ids)
+              raise SystemExit(
+                  f"Requested Llama model {requested_model!r} is not available "
+                  f"for code generation with this GROQ_API key. Usable Llama "
+                  f"models returned: {visible}. Select one of those models in "
+                  "the workflow input. The workflow will not silently substitute "
+                  "a different model."
               )
 
           payload = {
