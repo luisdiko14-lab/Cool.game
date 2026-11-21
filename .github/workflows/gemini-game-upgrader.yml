@@ -274,24 +274,24 @@ jobs:
           # format-only conversion before rejecting the response.
           if not patch.lstrip().startswith("diff --git "):
               print("⚠️ Model returned a non-Git patch; requesting unified-diff conversion...", flush=True)
+              # Ask for RAW diff text, not JSON. This avoids a second
+              # structured-output failure when the model emits multiline patches.
               convert_payload = {
                   "model": model,
                   "temperature": 0,
                   "max_tokens": 5000,
-                  "response_format": {"type": "json_object"},
                   "messages": [
                       {"role": "system", "content":
-                          "You are a patch-format converter. Return exactly one JSON object "
-                          "with string fields summary and patch. Convert the supplied patch "
-                          "into a standard Git unified diff. The patch MUST begin with "
-                          "'diff --git ', include --- and +++ headers and valid @@ hunks. "
-                          "Never return *** Begin Patch, *** Update File, *** Add File, "
-                          "Markdown fences, or full-file JSON. Preserve every intended edit "
-                          "exactly; do not invent, omit, or redesign changes. If conversion "
-                          "is impossible or input is truncated, return an empty patch."},
+                          "Convert the supplied patch into a standard Git unified diff. "
+                          "Output ONLY raw diff text, with no JSON, Markdown fences, "
+                          "explanations, or apply_patch markers. The first line MUST be "
+                          "'diff --git '. Include --- and +++ headers and valid @@ hunks. "
+                          "Preserve all intended edits; do not invent or omit changes. "
+                          "If input is truncated or cannot be converted safely, output "
+                          "exactly NO_SAFE_DIFF."},
                       {"role": "user", "content":
-                          "Convert this patch to standard unified Git diff. Preserve its edits. "
-                          "Return JSON only.\n\n" + patch[:20000]}
+                          "Convert this patch to standard unified Git diff. Output raw diff only.\\n\\n"
+                          + patch[:20000]}
                   ],
               }
               convert_request = urllib.request.Request(
@@ -311,15 +311,19 @@ jobs:
                   converted_text = (converted_choices[0].get("message") or {}).get("content") if converted_choices else None
                   if not isinstance(converted_text, str) or not converted_text.strip():
                       raise ValueError("Patch conversion returned an empty response.")
-                  converted = parse_model_json(converted_text)
-                  converted_patch = converted.get("patch") if isinstance(converted, dict) else None
-                  if not isinstance(converted_patch, str) or not converted_patch.strip():
-                      raise ValueError("Patch conversion did not return a patch.")
-                  patch = converted_patch.strip()
-                  summary = str(converted.get("summary") or summary).strip()
+                  converted_text = converted_text.strip()
+                  # Strip optional fences and any leading commentary, but never
+                  # synthesize or repair diff content locally.
+                  converted_text = re.sub(r"^\\s*```(?:diff)?\\s*\\n", "", converted_text, flags=re.IGNORECASE)
+                  converted_text = re.sub(r"\\n?```\\s*$", "", converted_text)
+                  diff_start = converted_text.find("diff --git ")
+                  if diff_start < 0:
+                      raise ValueError("Converter did not return a diff --git header.")
+                  patch = converted_text[diff_start:].strip()
+                  summary = summary or "Converted model patch to standard Git unified diff."
               except Exception as conversion_error:
                   raise SystemExit(
-                      "Model returned a non-standard patch and conversion failed; "
+                      "Model returned a non-standard patch and raw-diff conversion failed; "
                       "no files were modified. " + str(conversion_error)
                   ) from conversion_error
 
