@@ -129,6 +129,26 @@ jobs:
               api_key=os.environ["GEMINI_API"],
               http_options=types.HttpOptions(api_version="v1beta"),
           )
+          output_schema = types.Schema(
+              type=types.Type.OBJECT,
+              properties={
+                  "summary": types.Schema(type=types.Type.STRING),
+                  "files": types.Schema(
+                      type=types.Type.ARRAY,
+                      items=types.Schema(
+                          type=types.Type.OBJECT,
+                          properties={
+                              "path": types.Schema(type=types.Type.STRING),
+                              "content": types.Schema(type=types.Type.STRING),
+                          },
+                          required=["path", "content"],
+                      ),
+                  ),
+              },
+              required=["summary", "files"],
+          )
+
+          print("🤖 Gemini is planning and generating the game upgrade...")
           response = client.models.generate_content(
               model=os.environ["GEMINI_MODEL"],
               contents=(
@@ -139,14 +159,30 @@ jobs:
               config=types.GenerateContentConfig(
                   system_instruction=system,
                   temperature=0.35,
-                  max_output_tokens=30000,
+                  max_output_tokens=60000,
                   response_mime_type="application/json",
+                  response_schema=output_schema,
               ),
           )
           if not response.text:
               raise SystemExit("Gemini returned an empty response.")
 
-          result = json.loads(response.text)
+          print("🤖 Gemini response received; validating structured output...")
+          result = response.parsed
+          if result is None:
+              try:
+                  result = json.loads(response.text)
+              except json.JSONDecodeError as exc:
+                  preview = response.text[max(0, exc.pos - 300):exc.pos + 300]
+                  print(f"Gemini JSON parsing failed at line {exc.lineno}, column {exc.colno}.")
+                  print("Malformed response excerpt:")
+                  print(preview)
+                  raise SystemExit(
+                      "Gemini returned malformed or truncated JSON. "
+                      "Structured response parsing also failed; no files were modified."
+                  ) from exc
+          if not isinstance(result, dict):
+              raise SystemExit("Gemini returned an unexpected structured response type.")
           summary = str(result.get("summary", "")).strip()
           files = result.get("files")
           if not isinstance(files, list):
