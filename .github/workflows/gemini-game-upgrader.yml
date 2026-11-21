@@ -353,13 +353,13 @@ jobs:
           patch_file = Path("/tmp/openrouter-upgrade.patch")
           patch_file.write_text(patch, encoding="utf-8")
           check = subprocess.run(
-              ["git", "apply", "--check", str(patch_file)],
+              ["git", "apply", "--recount", "--check", str(patch_file)],
               text=True, capture_output=True,
           )
           if check.returncode:
               print(
                   "⚠️ Generated diff is malformed or does not match the checkout; "
-                  "requesting one targeted patch repair...",
+                  "requesting one targeted patch repair (Git will recalculate hunk counts)...",
                   flush=True,
               )
               repair_payload = {
@@ -372,7 +372,7 @@ jobs:
                           "to the supplied repository state. Output ONLY raw unified diff text. "
                           "No JSON, Markdown fences, explanations, or apply_patch format. "
                           "Every hunk line must begin with exactly one of space, +, or -. "
-                          "Hunk line counts must be correct. Keep diff --git, ---, +++, and @@ headers. "
+                          "Hunk lines must be correctly prefixed with space, +, or -. Hunk line counts may be approximate because git apply --recount recalculates them. Keep diff --git, ---, +++, and @@ headers. "
                           "Do not change the intended edits or invent code. If you cannot repair it "
                           "safely, output exactly NO_SAFE_DIFF."},
                       {"role": "user", "content":
@@ -429,7 +429,7 @@ jobs:
                       "Generated patch failed validation and the one repair attempt failed; "
                       "no game files were modified. " + str(repair_error)
                   ) from repair_error
-          subprocess.run(["git", "apply", str(patch_file)], check=True)
+          subprocess.run(["git", "apply", "--recount", str(patch_file)], check=True)
           changed_names = sorted(set(
               subprocess.check_output(
                   ["git", "diff", "--name-only"], text=True
