@@ -494,7 +494,8 @@
       credits(40 + Math.min(100, wave * 2));
       FX?.text?.(view().w / 2, view().h * .39, 'CONTRACT COMPLETE · +' + earned, '#ffc23d', 18);
     }
-    if (wave > 0 && wave % 5 === 0 && wave < MAX_WAVE) openRelicDraft();
+    // Rotate relic choices between the other milestone drafts (waves 20, 50, 80...).
+    if (wave > 0 && wave % 30 === 20 && wave < MAX_WAVE) openRelicDraft();
     updateHud();
   };
 
