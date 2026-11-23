@@ -28,6 +28,10 @@ try {
     foreach ($required in @(
         (Join-Path $publish "Neon_Swarm.exe"),
         (Join-Path $publish "Neon_Swarm_Crash_Handler.exe"),
+        (Join-Path $publish "Neon_Swarm_Pick.exe"),
+        (Join-Path $publish "Admin_Panel.exe"),
+        (Join-Path $publish "Neon_Swarm_Update_Checker_Background.exe"),
+        (Join-Path $publish "Neon_Swarm_Webview2_Background.exe"),
         (Join-Path $publish "Game\index.html")
     )) {
         if (-not (Test-Path $required)) { throw "Required publish output is missing: $required" }

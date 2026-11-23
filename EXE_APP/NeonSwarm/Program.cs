@@ -366,11 +366,11 @@ internal sealed class MainForm : Form
             if (IsDisposed || !IsHandleCreated || _browser.CoreWebView2 is null)
                 return "{\"ok\":false,\"message\":\"Neon Swarm is not ready.\"}";
             var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            BeginInvoke(async () =>
+            BeginInvoke(new Action(async () =>
             {
                 try { completion.TrySetResult(await _browser.CoreWebView2.ExecuteScriptAsync(script)); }
                 catch (Exception ex) { completion.TrySetResult(JsonSerializer.Serialize(new { ok = false, message = ex.Message })); }
-            });
+            }));
             return await completion.Task.WaitAsync(TimeSpan.FromSeconds(8), token);
         }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, message = ex.Message }); }

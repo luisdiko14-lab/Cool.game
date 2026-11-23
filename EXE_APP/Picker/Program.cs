@@ -182,6 +182,11 @@ internal sealed class PickerForm : Form
     {
         if (_booting) return;
         _selected = preset;
+        foreach (Panel card in _choices.Controls.OfType<Panel>())
+        {
+            foreach (RadioButton radio in card.Controls.OfType<RadioButton>())
+                radio.Checked = ((Preset)radio.Tag!).Id == preset.Id;
+        }
         _selectionStatus.Text = preset.Name + " selected — " + preset.Detail;
     }
 
