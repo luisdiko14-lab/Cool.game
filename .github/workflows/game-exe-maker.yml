@@ -90,7 +90,8 @@ jobs:
           $pyInstallerArgs = @("-m","PyInstaller","--noconfirm","--clean","--onefile","--windowed","--name","neon_web_python","--distpath","EXE_APP/dist/Neon_Swarm","--workpath","EXE_APP/dist/python-work","--specpath","EXE_APP/dist/python-spec","--collect-all","cryptography","--hidden-import","auth")
           $publicPath = (Resolve-Path "public").Path
           $pyInstallerArgs += @("--add-data","$publicPath;public")
-          $pyInstallerArgs += @("--add-data","public;public")
+          # Keep the source absolute: PyInstaller stores it in a spec under EXE_APP/dist/python-spec.
+          # A second relative "public" entry would be resolved from that spec directory and fail.
 
           foreach ($asset in $assets) {
             if (-not (Test-Path $asset)) { throw "Missing Python host asset: $asset" }
