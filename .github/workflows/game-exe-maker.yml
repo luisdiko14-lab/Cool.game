@@ -56,10 +56,15 @@ jobs:
           foreach ($f in $required) { if (-not (Test-Path $f)) { throw "Missing build output: $f" } }
           & "$p/Neon_Swarm.exe" --server-smoke-test
           if ($LASTEXITCODE -ne 0) {
-            $diagnostic = Join-Path $env:LOCALAPPDATA "NeonSwarm/Neon_Swarm_Crash.log"
+            $diagnostic = Join-Path $env:TEMP "NeonSwarm-SmokeTest.log"
             if (Test-Path $diagnostic) {
-              Write-Host "Desktop host diagnostics:"
-              Get-Content $diagnostic -Tail 80
+              Write-Host "Desktop host smoke-test exception:"
+              Get-Content $diagnostic -Raw
+            }
+            $crashLog = Join-Path $env:LOCALAPPDATA "NeonSwarm/Neon_Swarm_Crash.log"
+            if (Test-Path $crashLog) {
+              Write-Host "Desktop host crash log:"
+              Get-Content $crashLog -Tail 80
             }
             throw "Desktop local-server test failed."
           }
