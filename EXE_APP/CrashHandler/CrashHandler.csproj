@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Neon_Swarm_Crash_Handler</AssemblyName>
+    <RootNamespace>NeonSwarm.CrashHandler</RootNamespace>
+    <SelfContained>true</SelfContained>
+    <UseAppHost>true</UseAppHost>
+    <PublishSingleFile>false</PublishSingleFile>
+    <Company>Luis Apps Inc.</Company>
+    <Product>Neon Swarm Crash Recovery</Product>
+    <Description>Neon Swarm notification-area crash recovery helper</Description>
+    <Version>1.0.0</Version>
+    <Copyright>Copyright © Luis Apps Inc.</Copyright>
+  </PropertyGroup>
+</Project>

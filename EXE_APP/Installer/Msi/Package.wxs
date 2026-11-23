@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="Neon Swarm"
+           Manufacturer="Luis Apps Inc."
+           Version="1.0.0"
+           UpgradeCode="A7A7F93D-24A5-4E3E-95EA-7D11EBDB5460"
+           Scope="perMachine"
+           InstallerVersion="500">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Neon Swarm is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/luisdiko14-lab/Cool.game" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Neon Swarm" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Neon Swarm" />
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="Neon Swarm" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**" />
+    </ComponentGroup>
+    <Component Id="StartMenuShortcut" Directory="ApplicationProgramsFolder"
+               Guid="D124AE53-A7C3-4A91-89D6-B36A961C5EB2">
+      <Shortcut Id="StartMenuLaunchShortcut" Name="Neon Swarm"
+                Description="Play Neon Swarm" Target="[INSTALLFOLDER]Neon_Swarm.exe"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveNeonSwarmStartMenu" On="uninstall" />
+      <RegistryValue Root="HKLM" Key="Software\Luis Apps Inc.\Neon Swarm"
+                     Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <Component Id="DesktopShortcut" Directory="DesktopFolder"
+               Guid="B4F3DB48-DB9B-4D76-99F4-DF2D5B4E0E53">
+      <Shortcut Id="DesktopLaunchShortcut" Name="Neon Swarm"
+                Description="Play Neon Swarm" Target="[INSTALLFOLDER]Neon_Swarm.exe"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RegistryValue Root="HKLM" Key="Software\Luis Apps Inc.\Neon Swarm"
+                     Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+  </Fragment>
+</Wix>

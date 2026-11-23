@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle Name="Neon Swarm Setup"
+          Manufacturer="Luis Apps Inc."
+          Version="1.0.0.0"
+          UpgradeCode="D3F2A20A-9D7B-4AF1-B1AD-75F29C93C4E6">
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+          Theme="hyperlinkLicense"
+          LicenseUrl="https://github.com/luisdiko14-lab/Cool.game/blob/main/LICENSE"
+          ShowVersion="yes" />
+    </BootstrapperApplication>
+    <Chain>
+      <ExePackage Id="WebView2Evergreen"
+                  SourceFile="$(var.WebView2Installer)"
+                  InstallArguments="/silent /install"
+                  Permanent="yes"
+                  Vital="yes" />
+      <MsiPackage Id="NeonSwarmMsi"
+                  SourceFile="$(var.MsiPath)"
+                  DisplayInternalUI="yes"
+                  Vital="yes" />
+    </Chain>
+  </Bundle>
+</Wix>

@@ -195,6 +195,48 @@ body.low-pixels canvas{image-rendering:pixelated}
   #move-knob{position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px;border:2px solid var(--cyan);border-radius:50%;background:rgba(61,245,255,.25);pointer-events:none}
   #touch-dash{width:76px;height:76px;padding:0;border-radius:50%;pointer-events:auto;touch-action:none}
 }
+
+#menu.panel.on{display:flex;align-items:center;justify-content:center;padding:clamp(14px,3vh,30px);overflow:auto;touch-action:pan-y}
+.menu-shell{width:min(1040px,96vw);display:grid;grid-template-columns:minmax(0,1.08fr) minmax(300px,.92fr);align-items:center;gap:clamp(18px,4vw,46px);margin:auto}
+.menu-main{display:flex;flex-direction:column;align-items:center;gap:16px;min-width:0;text-align:center}
+.menu-kicker{color:var(--cyan);font-size:11px;letter-spacing:.22em;font-weight:800;text-transform:uppercase}
+.menu-main h1{font-size:clamp(62px,9vw,112px);margin:4px 0;text-align:center}
+.menu-main p{max-width:42ch}
+.menu-play{width:min(100%,360px);min-height:62px;padding:14px 24px;font-size:21px}
+.menu-side{display:flex;flex-direction:column;gap:14px;min-width:0;padding:clamp(14px,2.4vw,22px);border:1px solid rgba(61,245,255,.28);border-radius:18px;background:rgba(17,8,43,.84);box-shadow:0 18px 55px rgba(0,0,0,.26),inset 0 0 22px rgba(155,92,255,.08)}
+.menu-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.menu-actions button{width:100%;min-width:0;min-height:48px;padding:10px 11px;border-radius:12px;font-size:14px;line-height:1.2;white-space:normal;overflow-wrap:anywhere}
+.menu-account{display:grid;gap:8px;padding-top:12px;border-top:1px solid rgba(165,146,214,.22)}
+.menu-account p{max-width:none;font-size:12px;text-align:center;overflow-wrap:anywhere}
+.menu-account #profile{font-size:14px;color:var(--gold)}
+.menu-account #account-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.menu-account #account-actions button{min-height:38px;padding:8px 12px;font-size:12px}
+.menu-bottom{display:grid;gap:8px;justify-items:center}
+.menu-bottom-label{color:var(--dim);font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+#menu #skins{min-height:42px;flex-wrap:wrap}
+#menu #b0{width:min(100%,330px);max-height:112px;overflow:auto}
+#menu .board li{font-size:12px}
+#pause.panel.on{gap:12px;padding:20px}
+#pause button{width:min(320px,88vw);min-height:46px;padding:10px 18px}
+#settings .save-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:min(420px,90vw)}
+#settings .save-tools button{min-width:0;min-height:44px;padding:9px 10px;border-radius:10px;font-size:13px}
+#save-tools-status{font-size:12px;max-width:38ch}
+@media(max-width:760px){
+#menu.panel.on{justify-content:flex-start;padding:16px 12px}
+.menu-shell{grid-template-columns:minmax(0,1fr);width:min(560px,100%);gap:18px}
+.menu-main{gap:12px}
+.menu-main h1{font-size:clamp(52px,15vw,78px)}
+.menu-side{width:100%;padding:14px;border-radius:14px}
+.menu-actions button{min-height:46px;font-size:13px}
+}
+@media(max-height:720px) and (min-width:761px){
+#menu.panel.on{align-items:flex-start}
+.menu-shell{margin:auto}
+.menu-main h1{font-size:clamp(52px,7vw,82px)}
+.menu-side{gap:10px;padding:14px}
+.menu-main{gap:10px}
+}
+
 </style>
 </head>
 <body>
@@ -204,21 +246,39 @@ body.low-pixels canvas{image-rendering:pixelated}
 <div id="touch-controls" role="group" aria-label="Touch controls"><div id="move-pad" aria-label="Movement joystick"><span>MOVE</span><div id="move-knob"></div></div><button id="touch-dash" class="alt" type="button">Dash</button></div>
 <audio id="bg-music" src="Raya(Slowed).mp3" loop preload="none"></audio>
 <section class="panel on" id="menu">
+<div class="menu-shell">
+<div class="menu-main">
+<span class="menu-kicker">NEON SWARM / PILOT SYSTEM</span>
 <h1>Neon<br>Swarm</h1>
 <p>Survive 60 fixed formations. Bosses guard key waves, and wave 60 is the final fight. Collect health, tune audio, and use the mobile controls when playing on a phone.</p>
 <p>Move with WASD, arrow keys or by dragging. Dash with Space, Shift or a quick tap. P pauses and M mutes.</p>
-<p id="profile"></p><p id="account-status" role="status" aria-live="polite">Checking account sync...</p><div id="account-actions"><button class="alt" id="account-login" type="button">Sign in / create account</button><button class="alt" id="account-logout" type="button" hidden>Sign out</button></div><p id="save-status" role="status" aria-live="polite">Progress saves in this browser for this site address.</p><div id="skins" aria-label="Ship skins"></div>
-<ol class="board" id="b0"></ol>
+<button id="play" class="menu-play">Start run</button>
+</div>
+<div class="menu-side">
+<div class="menu-actions">
 <button class="alt" id="records-open-menu" type="button">Pilot records</button>
 <button class="alt" id="shop-open-menu" type="button">Shop</button>
 <button class="alt" id="settings-open" type="button">Settings</button>
 <button class="alt" data-fullscreen type="button" aria-pressed="false">Fullscreen</button>
 <button class="alt" id="games-open-menu" type="button">Other games!</button>
 <button class="alt" id="admin-open-menu" type="button">Admin commands</button>
-<button id="play">Start run</button>
+</div>
+<div class="menu-account">
+<p id="profile"></p>
+<p id="account-status" role="status" aria-live="polite">Checking account sync...</p>
+<div id="account-actions"><button class="alt" id="account-login" type="button">Sign in / create account</button><button class="alt" id="account-logout" type="button" hidden>Sign out</button></div>
+<p id="save-status" role="status" aria-live="polite">Progress saves in this browser for this site address.</p>
+</div>
+<div class="menu-bottom">
+<span class="menu-bottom-label">Ship skin / local records</span>
+<div id="skins" aria-label="Ship skins"></div>
+<ol class="board" id="b0"></ol>
+</div>
+</div>
+</div>
 </section>
-<section class="panel" id="pause"><h2>Paused</h2><button id="resume">Resume</button><button class="alt" id="records-open-pause" type="button">Pilot records</button><button class="alt" id="shop-open-pause" type="button">Shop</button><button class="alt" id="settings-pause" type="button">Settings</button><button class="alt" id="games-open-pause" type="button">Other games!</button><button class="alt" id="admin-open-pause" type="button">Admin commands</button><button class="alt" id="quit">Quit to menu</button></section>
-<section class="panel" id="settings"><h2>Settings</h2><label class="setting-row"><span>Music</span><input id="music-enabled" type="checkbox"></label><label class="setting-row"><span>Music volume</span><input id="music-volume" type="range" min="0" max="100" value="35"></label><label class="setting-row"><span>Effects volume</span><input id="effects-volume" type="range" min="0" max="100" value="65"></label><label class="setting-row"><span>Frame cap <output id="fps-cap-value">60</output> FPS</span><input id="fps-cap" type="range" min="20" max="1000" step="10" value="60"></label><label class="setting-row"><span>FPS counter</span><input id="fps-visible" type="checkbox"></label><label class="setting-row"><span>Resolution quality</span><select id="resolution"><option value="240">240p - Low (no FX/music)</option><option value="340">340p - Low (no FX/music)</option><option value="480">480p</option><option value="720">720p</option><option value="1080">1080p</option><option value="1440">1440p (2K HD)</option><option value="2160">2160p (4K Ultra HD)</option><option value="4320">4320p (8K Ultra HD+)</option></select></label><p>FPS is limited by your display/browser. Resolution changes in-game rendering quality, not your monitor, and may be capped by device memory.</p><button class="alt" id="settings-close" type="button">Done</button></section>
+<section class="panel" id="pause"><h2>Paused</h2><button id="resume">Resume</button><button class="alt" id="restart-run" type="button">Restart run</button><button class="alt" id="records-open-pause" type="button">Pilot records</button><button class="alt" id="shop-open-pause" type="button">Shop</button><button class="alt" id="settings-pause" type="button">Settings</button><button class="alt" id="games-open-pause" type="button">Other games!</button><button class="alt" id="admin-open-pause" type="button">Admin commands</button><button class="alt" id="quit">Quit to menu</button></section>
+<section class="panel" id="settings"><h2>Settings</h2><label class="setting-row"><span>Music</span><input id="music-enabled" type="checkbox"></label><label class="setting-row"><span>Music volume</span><input id="music-volume" type="range" min="0" max="100" value="35"></label><label class="setting-row"><span>Effects volume</span><input id="effects-volume" type="range" min="0" max="100" value="65"></label><label class="setting-row"><span>Frame cap <output id="fps-cap-value">60</output> FPS</span><input id="fps-cap" type="range" min="20" max="1000" step="10" value="60"></label><label class="setting-row"><span>FPS counter</span><input id="fps-visible" type="checkbox"></label><label class="setting-row"><span>Resolution quality</span><select id="resolution"><option value="240">240p - Low (no FX/music)</option><option value="340">340p - Low (no FX/music)</option><option value="480">480p</option><option value="720">720p</option><option value="1080">1080p</option><option value="1440">1440p (2K HD)</option><option value="2160">2160p (4K Ultra HD)</option><option value="4320">4320p (8K Ultra HD+)</option></select></label><p>FPS is limited by your display/browser. Resolution changes in-game rendering quality, not your monitor, and may be capped by device memory.</p><div class="save-tools"><button class="alt" id="export-progress" type="button">Export progress</button><button class="alt" id="import-progress-button" type="button">Import progress</button><input id="import-progress" type="file" accept=".json,application/json" hidden></div><p id="save-tools-status" role="status" aria-live="polite">Back up your pilot profile or restore it on another device.</p><button class="alt" id="settings-close" type="button">Done</button></section>
 <section class="panel" id="records"><h2>Pilot records</h2><p id="records-summary"></p><div class="career-grid"><div class="career-stat"><span>Sorties</span><strong id="career-runs">0</strong></div><div class="career-stat"><span>Campaign wins</span><strong id="career-wins">0</strong></div><div class="career-stat"><span>Best wave</span><strong id="career-wave">0</strong></div><div class="career-stat"><span>Best score</span><strong id="career-score">0</strong></div><div class="career-stat"><span>Eliminations</span><strong id="career-kills">0</strong></div><div class="career-stat"><span>Bosses defeated</span><strong id="career-bosses">0</strong></div></div><div class="achievement-grid" id="achievement-list"></div><button class="alt" id="records-close" type="button">Back</button></section>
 <section class="panel" id="shop"><h2>Hangar shop</h2><p id="shop-balance"></p><p>Earn credits by clearing waves. Buy a ship, then equip it here or from the quick-select row.</p><div class="shop-grid" id="shop-grid"></div><button class="alt" id="shop-close" type="button">Back</button></section>
 <section class="panel" id="admin-lock"><h2>Admin Access</h2><label class="setting-row"><span>Password</span><input id="admin-password" type="password" inputmode="numeric" autocomplete="off" maxlength="16"></label><p id="admin-lock-status" role="status" aria-live="polite"></p><button id="admin-unlock" type="button">Unlock</button><button class="alt" id="admin-lock-close" type="button">Back</button></section>
@@ -754,6 +814,46 @@ $('sub').onclick=async()=>{const n=$('nm').value.trim().slice(0,12)||'Player';$(
   if(shared){board($('b1'),shared,Game.score);$('submit-status').textContent=local?'Saved to the shared leaderboard.':'Shared score saved; browser storage is unavailable.'}
   else if(local){board($('b1'),local,Game.score);$('submit-status').textContent='Saved on this device. The shared leaderboard is unavailable.'}
   else $('submit-status').textContent='Could not save this score. Check browser storage or the server.'};
+
+const SaveTransfer={
+ keys:['neonswarm.scores','neonswarm.profile','neonswarm.settings','neonswarm.admin','neonswarm.arcade','neonswarm.features'],
+ async export(){
+  const data={};
+  for(const key of this.keys){try{const raw=localStorage.getItem(key);if(raw!==null)data[key]=JSON.parse(raw)}catch(_){}}
+  const backup={format:'neon-swarm-save',version:1,exportedAt:new Date().toISOString(),data};
+  const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob),link=document.createElement('a');
+  link.href=url;link.download='Neon_Swarm_Save_'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);
+  $('save-tools-status').textContent='Progress backup exported.';
+ },
+ async import(file){
+  const status=$('save-tools-status');if(!file)return;
+  try{
+   if(file.size>524288)throw new Error('Backup is too large (maximum 512 KB).');
+   const backup=JSON.parse(await file.text());
+   if(!backup||backup.format!=='neon-swarm-save'||backup.version!==1||!backup.data||typeof backup.data!=='object'||Array.isArray(backup.data))throw new Error('This is not a supported Neon Swarm backup.');
+   const entries=Object.entries(backup.data);
+   if(!entries.length)throw new Error('The backup contains no saved progress.');
+   for(const [key,value] of entries){
+    if(!this.keys.includes(key))throw new Error('The backup contains an unknown save field.');
+    if(!value||typeof value!=='object')throw new Error('The backup contains invalid save data.');
+    if(JSON.stringify(value).length>131072)throw new Error('One save section is too large.');
+   }
+   if(!window.confirm('Import this backup and replace the matching saved progress on this device?'))return;
+   for(const [key,value] of entries)localStorage.setItem(key,JSON.stringify(value));
+   status.textContent='Progress imported. Syncing and refreshing...';
+   if(typeof SavedData!=='undefined'&&SavedData.id&&typeof SavedData.push==='function'){try{await SavedData.push()}catch(_){}}
+   setTimeout(()=>location.reload(),350);
+  }catch(error){status.textContent=error&&error.message?error.message:'Could not import this backup.'}
+  finally{$('import-progress').value=''}
+ }
+};
+$('export-progress').onclick=()=>SaveTransfer.export();
+$('import-progress-button').onclick=()=>$('import-progress').click();
+$('import-progress').onchange=event=>SaveTransfer.import(event.target.files&&event.target.files[0]);
+$('restart-run').onclick=()=>{if(window.confirm('Restart this run and reset the current score?'))Game.start()};
+
 window.NeonSwarmCore={Game,Profile,Settings,Input,FX,Sfx,TYPES,PAT,BOSS_HP,MAX_WAVE,getView:()=>view,canvas:cv,savedData:typeof SavedData==='undefined'?null:SavedData};
 SavedData.init().finally(()=>{Profile.init();Settings.init();Admin.init();MiniGames.init();Racer.init();Input.bind();resize();Game.best=Store.load()[0]?.s||0;board($('b0'),Store.load(),-1);Net.get().then(s=>s&&board($('b0'),s,-1));requestAnimationFrame(frame)});
 </script>
