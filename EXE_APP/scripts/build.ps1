@@ -47,6 +47,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Could not add the WiX UI extension." }
     & wix extension add -g WixToolset.BootstrapperApplications.wixext/6.0.0
     if ($LASTEXITCODE -ne 0) { throw "Could not add the WiX bootstrapper extension." }
+    & wix extension add -g WixToolset.Util.wixext/6.0.0
+    if ($LASTEXITCODE -ne 0) { throw "Could not add the WiX Util extension." }
 
     $runtime = Join-Path $dist "MicrosoftEdgeWebView2Setup.exe"
     Invoke-WebRequest -UseBasicParsing -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $runtime
@@ -54,7 +56,7 @@ try {
     $setup = Join-Path $dist "Neon_Swarm_Setup.exe"
     & wix build -arch x64 -ext WixToolset.UI.wixext -d "PublishDir=$publish" "Installer/Msi/Package.wxs" -out $msi
     if ($LASTEXITCODE -ne 0) { throw "WiX could not create the MSI." }
-    & wix build -arch x64 -ext WixToolset.BootstrapperApplications.wixext -d "MsiPath=$msi" -d "WebView2Installer=$runtime" "Installer/Bundle/Bundle.wxs" -out $setup
+    & wix build -arch x64 -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext -d "MsiPath=$msi" -d "WebView2Installer=$runtime" "Installer/Bundle/Bundle.wxs" -out $setup
     if ($LASTEXITCODE -ne 0) { throw "WiX could not create Setup.exe." }
 
     Write-Host "[4/4] Creating the complete portable ZIP..." -ForegroundColor Cyan

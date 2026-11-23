@@ -82,6 +82,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "WiX UI extension install failed." }
           wix extension add -g WixToolset.BootstrapperApplications.wixext/6.0.0
           if ($LASTEXITCODE -ne 0) { throw "WiX bootstrapper extension install failed." }
+          wix extension add -g WixToolset.Util.wixext/6.0.0
+          if ($LASTEXITCODE -ne 0) { throw "WiX Util extension install failed." }
 
       - name: Download WebView2 Evergreen bootstrapper
         working-directory: EXE_APP
@@ -100,7 +102,7 @@ jobs:
         working-directory: EXE_APP
         run: |
           $dist = (Resolve-Path dist).Path
-          wix build -arch x64 -ext WixToolset.BootstrapperApplications.wixext -d "MsiPath=$dist/Neon_Swarm_Setup.msi" -d "WebView2Installer=$dist/MicrosoftEdgeWebView2Setup.exe" Installer/Bundle/Bundle.wxs -out dist/Neon_Swarm_Setup.exe
+          wix build -arch x64 -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext -d "MsiPath=$dist/Neon_Swarm_Setup.msi" -d "WebView2Installer=$dist/MicrosoftEdgeWebView2Setup.exe" Installer/Bundle/Bundle.wxs -out dist/Neon_Swarm_Setup.exe
           if ($LASTEXITCODE -ne 0) { throw "Setup.exe build failed." }
 
       - name: Create complete portable package
