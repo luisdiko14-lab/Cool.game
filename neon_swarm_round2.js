@@ -133,7 +133,7 @@ function seededMutation(enemy){
 function recordFrame(){
   if(!Game.p||Game.state!=='play')return;
   const v=core.getView(),p=Game.p;
-  replayFrames.push({t:Math.round((performance.now()-runStartAt)/100),x:p.x/Math.max(1,v.w),y:p.y/Math.max(1,v.h),hp:p.hp,score:Game.score,wave:Game.wave,kills:killHighlights.slice(-8).map(k=>({x:k.x/Math.max(1,v.w),y:k.y/Math.max(1,v.h),kind:k.kind})),enemies:(Game.enemies||[]).slice(0,60).map(e=>({x:e.x/Math.max(1,v.w),y:e.y/Math.max(1,v.h),k:e.k,hp:e.hp,mhp:e.mhp,mutation:e.nsMutation||''}))});
+  replayFrames.push({t:Math.round((performance.now()-runStartAt)/100),x:p.x/Math.max(1,v.w),y:p.y/Math.max(1,v.h),hp:p.hp,score:Game.score,wave:Game.wave,kills:killHighlights.filter(k=>performance.now()-k.t<1200).slice(-8).map(k=>({x:k.x/Math.max(1,v.w),y:k.y/Math.max(1,v.h),kind:k.kind})),enemies:(Game.enemies||[]).slice(0,60).map(e=>({x:e.x/Math.max(1,v.w),y:e.y/Math.max(1,v.h),k:e.k,hp:e.hp,mhp:e.mhp,mutation:e.nsMutation||''}))});
   if(replayFrames.length>360)replayFrames.shift();
 }
 function saveReplay(){
@@ -604,6 +604,8 @@ function hooks(){
   };
   const oldOver=Game.over;
   Game.over=function(){saveReplay();return oldOver.apply(this,arguments)};
+  const oldGoMenu=Game.goMenu;
+  Game.goMenu=function(){saveReplay();return oldGoMenu.apply(this,arguments)};
   const oldSpawn=Game.spawnWave;
   Game.spawnWave=function(){
     oldSpawn.call(this);
