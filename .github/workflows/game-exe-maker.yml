@@ -40,7 +40,7 @@ jobs:
       - name: Publish Neon_Swarm.exe
         working-directory: EXE_APP
         run: |
-          dotnet publish NeonSwarm/NeonSwarm.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=true -o dist/Neon_Swarm
+          dotnet publish NeonSwarm/NeonSwarm.csproj -c Release -r win-x64 --self-contained true -p:DesktopBuildNumber=${{ github.run_number }} -p:PublishSingleFile=false -p:PublishReadyToRun=true -o dist/Neon_Swarm
           if ($LASTEXITCODE -ne 0) { throw "Game publish failed." }
 
       - name: Publish crash recovery helper
@@ -49,10 +49,20 @@ jobs:
           dotnet publish CrashHandler/CrashHandler.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=true -o dist/Neon_Swarm
           if ($LASTEXITCODE -ne 0) { throw "Crash helper publish failed." }
 
+      - name: Publish picker, Admin Panel and background services
+        working-directory: EXE_APP
+        shell: pwsh
+        run: |
+          $projects = @("Picker/Picker.csproj","AdminPanel/AdminPanel.csproj","UpdateChecker/UpdateChecker.csproj","WebViewBackground/WebViewBackground.csproj")
+          foreach ($project in $projects) {
+            dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=true -o dist/Neon_Swarm
+            if ($LASTEXITCODE -ne 0) { throw "Publish failed: $project" }
+          }
+
       - name: Smoke-test local game host and files
         run: |
           $p = "EXE_APP/dist/Neon_Swarm"
-          $required = @("$p/Neon_Swarm.exe","$p/Neon_Swarm_Crash_Handler.exe","$p/Neon_Swarm.dll","$p/Game/index.html","$p/Game/neon_swarm_features.js","$p/Game/neon_swarm_expansion.js","$p/Game/neon_swarm_apex.js","$p/Game/Raya(Slowed).mp3")
+          $required = @("$p/Neon_Swarm.exe","$p/Neon_Swarm_Crash_Handler.exe","$p/Neon_Swarm.dll","$p/Neon_Swarm_Pick.exe","$p/Neon_Swarm_Pick.dll","$p/Admin_Panel.exe","$p/Admin_Panel.dll","$p/Neon_Swarm_Update_Checker_Background.exe","$p/Neon_Swarm_Update_Checker_Background.dll","$p/Neon_Swarm_Webview2_Background.exe","$p/Neon_Swarm_Webview2_Background.dll","$p/Game/index.html","$p/Game/neon_swarm_features.js","$p/Game/neon_swarm_expansion.js","$p/Game/neon_swarm_apex.js","$p/Game/Raya(Slowed).mp3")
           foreach ($f in $required) { if (-not (Test-Path $f)) { throw "Missing build output: $f" } }
           $smoke = Start-Process -FilePath "$p/Neon_Swarm.exe" -ArgumentList @("--server-smoke-test") -WorkingDirectory (Resolve-Path $p).Path -Wait -PassThru -WindowStyle Hidden
           if ($smoke.ExitCode -ne 0) {
@@ -67,6 +77,10 @@ jobs:
               Get-Content $crashLog -Tail 80
             }
             throw "Desktop local-server test failed with exit code $($smoke.ExitCode)."
+          }
+          foreach ($utility in @("Neon_Swarm_Pick.exe","Admin_Panel.exe","Neon_Swarm_Update_Checker_Background.exe","Neon_Swarm_Webview2_Background.exe")) {
+            $test = Start-Process -FilePath "$p/$utility" -ArgumentList @("--smoke-test") -WorkingDirectory (Resolve-Path $p).Path -Wait -PassThru -WindowStyle Hidden
+            if ($test.ExitCode -ne 0) { throw "$utility smoke test failed with exit code $($test.ExitCode)." }
           }
           $helperTest = Start-Process -FilePath "$p/Neon_Swarm_Crash_Handler.exe" -ArgumentList @("--smoke-test") -WorkingDirectory (Resolve-Path $p).Path -Wait -PassThru -WindowStyle Hidden
           if ($helperTest.ExitCode -ne 0) { throw "Crash-handler smoke test failed with exit code $($helperTest.ExitCode)." }
