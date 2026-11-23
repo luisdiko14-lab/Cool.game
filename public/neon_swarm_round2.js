@@ -12,7 +12,7 @@ const base = {
   map:{seed:0,theme:'NEON RUINS',obstacles:[],secrets:[],found:[]},
   drones:[],materials:{scrap:0,crystal:0,core:0},mods:{damage:0,armor:0,rate:0},
   mutations:{seen:0},season:{id:'',xp:0,claimed:[]},
-  replays:[],customs:[],tradeInventory:[],event:{id:'',kills:0,contributed:0,claimed:false}
+  replays:[],customs:[],tradeInventory:[],event:{id:'',kills:0,contributed:0,claimed:false,bossDefeated:false}
 };
 function loadState(){
   try {
@@ -133,7 +133,7 @@ function seededMutation(enemy){
 function recordFrame(){
   if(!Game.p||Game.state!=='play')return;
   const v=core.getView(),p=Game.p;
-  replayFrames.push({t:Math.round((performance.now()-runStartAt)/100),x:p.x/Math.max(1,v.w),y:p.y/Math.max(1,v.h),hp:p.hp,score:Game.score,wave:Game.wave,kills:killHighlights.slice(-8).map(k=>({x:k.x/Math.max(1,v.w),y:k.y/Math.max(1,v.h),kind:k.kind})),enemies:(Game.enemies||[]).slice(0,60).map(e=>({x:e.x/Math.max(1,v.w),y:e.y/Math.max(1,v.h),k:e.k,hp:e.hp,mhp:e.mhp,mutation:e.nsMutation||''}))});
+  replayFrames.push({t:Math.round((performance.now()-runStartAt)/100),x:p.x/Math.max(1,v.w),y:p.y/Math.max(1,v.h),hp:p.hp,score:Game.score,wave:Game.wave,kills:killHighlights.filter(k=>performance.now()-k.t<1200).slice(-8).map(k=>({x:k.x/Math.max(1,v.w),y:k.y/Math.max(1,v.h),kind:k.kind})),enemies:(Game.enemies||[]).slice(0,60).map(e=>({x:e.x/Math.max(1,v.w),y:e.y/Math.max(1,v.h),k:e.k,hp:e.hp,mhp:e.mhp,mutation:e.nsMutation||''}))});
   if(replayFrames.length>360)replayFrames.shift();
 }
 function saveReplay(){
@@ -207,24 +207,24 @@ function drawReplayPreview(){
 }
 function marketHeaders(){return marketToken?{'Content-Type':'application/json','X-Market-Token':marketToken}:{'Content-Type':'application/json'}}
 async function ensureMarketSession(){
-  if(marketToken){try{const check=await fetch('/api/market/account',{headers:marketHeaders()});if(check.ok)return true}catch(_){}}
+  if(marketToken){try{const check=await fetch(await backendUrl('/api/market/account'),{headers:marketHeaders()});if(check.ok)return true}catch(_){}}
   marketToken='';localStorage.removeItem('neonswarm.market-token');
   const name=(localStorage.getItem('neonswarm.name')||'Pilot').slice(0,16);
-  const response=await fetch('/api/market/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})});
+  const response=await fetch(await backendUrl('/api/market/session'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})});
   if(!response.ok)throw new Error('Marketplace service unavailable');
   const data=await response.json();marketToken=data.token;localStorage.setItem('neonswarm.market-token',marketToken);return true;
 }
 async function refreshMarket(){
   await ensureMarketSession();
-  const [a,b]=await Promise.all([fetch('/api/market/account',{headers:marketHeaders()}),fetch('/api/market/listings')]);
+  const [a,b]=await Promise.all([fetch(await backendUrl('/api/market/account'),{headers:marketHeaders()}),fetch(await backendUrl('/api/market/listings'))]);
   if(!a.ok||!b.ok)throw new Error('Marketplace service unavailable');
   const account=await a.json(),listings=await b.json();
   if(Array.isArray(account.deliveries)&&account.deliveries.length){
     account.deliveries.forEach(item=>S.tradeInventory.push(item));
     save();
-    await fetch('/api/market/account/claim',{method:'POST',headers:marketHeaders(),body:'{}'});
+    await fetch(await backendUrl('/api/market/account/claim'),{method:'POST',headers:marketHeaders(),body:'{}'});
   }
-  if(account.balance>0){reward(account.balance);await fetch('/api/market/account/withdraw',{method:'POST',headers:marketHeaders(),body:'{}'});}
+  if(account.balance>0){reward(account.balance);await fetch(await backendUrl('/api/market/account/withdraw'),{method:'POST',headers:marketHeaders(),body:'{}'});}
   marketRows=listings.listings||[];render();
 }
 async function createMarketListing(index){
@@ -232,13 +232,13 @@ async function createMarketListing(index){
   await ensureMarketSession();
   const price=Math.max(1,Math.min(100000,Number(prompt('Set a credit price for '+item.name, '100'))||0));
   if(!price)return;
-  const response=await fetch('/api/market/listings',{method:'POST',headers:marketHeaders(),body:JSON.stringify({item:item,price:price})});
+  const response=await fetch(await backendUrl('/api/market/listings'),{method:'POST',headers:marketHeaders(),body:JSON.stringify({item:item,price:price})});
   const result=await response.json();if(!response.ok)throw new Error(result.error||'Could not list item');
   S.tradeInventory.splice(index,1);save();await refreshMarket();
 }
 async function buyMarketListing(id){
   await ensureMarketSession();
-  const response=await fetch('/api/market/listings/'+encodeURIComponent(id)+'/buy',{method:'POST',headers:marketHeaders(),body:'{}'});
+  const response=await fetch(await backendUrl('/api/market/listings/'+encodeURIComponent(id)+'/buy'),{method:'POST',headers:marketHeaders(),body:'{}'});
   const result=await response.json();if(!response.ok)throw new Error(result.error||'Purchase failed');
   await refreshMarket();
 }
@@ -257,13 +257,13 @@ async function discoverServerBase(){
   return url.origin;
 }
 async function refreshChallenges(){
-  const response=await fetch('/api/challenges',{cache:'no-store'});
+  const response=await fetch(await backendUrl('/api/challenges'),{cache:'no-store'});
   if(!response.ok)throw new Error('Challenge sharing service is unavailable');
   const data=await response.json();remoteChallenges=data.challenges||[];render();
 }
 async function shareChallenge(index){
   const challenge=S.customs[index];if(!challenge)throw new Error('Custom challenge not found');
-  const response=await fetch('/api/challenges',{method:'POST',headers:{'Content-Type':'application/json'},
+  const response=await fetch(await backendUrl('/api/challenges'),{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({...challenge,author:localStorage.getItem('neonswarm.name')||'Pilot'})});
   const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not share challenge');
   alert('Challenge shared! Code: '+data.challenge.shareCode);
@@ -315,16 +315,31 @@ async function leaveRoom(notify){
 }
 function currentEventName(){return eventInfo&&eventInfo.event&&eventInfo.event.id||dateKey()}
 async function refreshEvent(){
-  try{const r=await fetch('/api/events',{cache:'no-store'});if(r.ok){eventInfo=await r.json();if(S.event.id!==currentEventName())S.event={id:currentEventName(),kills:0,contributed:0,claimed:false};save();render()}}catch(_){}
+  try{const r=await fetch(await backendUrl('/api/events'),{cache:'no-store'});if(r.ok){eventInfo=await r.json();if(S.event.id!==currentEventName())S.event={id:currentEventName(),kills:0,contributed:0,claimed:false,bossDefeated:false};save();render()}}catch(_){}
 }
 async function contributeEvent(){
   if(!eventInfo||!eventInfo.event)return;
   const now=Date.now();if(now-lastEventSend<8000)return;lastEventSend=now;
-  try{const r=await fetch('/api/events/contribute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kills:5})});if(r.ok)eventInfo=await r.json()}catch(_){}
+  try{const r=await fetch(await backendUrl('/api/events/contribute'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kills:5})});if(r.ok)eventInfo=await r.json()}catch(_){}
 }
 function claimEvent(){
   if(!eventInfo||!eventInfo.event||S.event.kills<20||S.event.claimed)return;
   S.event.claimed=true;reward(500);save();render();
+}
+function startEventBoss(){
+  if(!eventInfo||!eventInfo.event)throw new Error('Live invasion data is unavailable');
+  if(S.event.bossDefeated)throw new Error('You already claimed this invasion boss reward today');
+  closePanel();S.campaign.active=null;save();
+  Game.start();
+  const view=core.getView();Game.wave=Math.max(15,Math.min(60,Game.wave));
+  Game.enemies=[];Game.bullets=[];Game.eb=[];Game.gems=[];Game.betweenWaves=false;
+  Game.add('boss',view.w/2,view.h*.22,3200+Game.wave*45);
+  const boss=Game.enemies[Game.enemies.length-1];if(boss){boss.r=76;boss.hp=3200+Game.wave*45;boss.mhp=boss.hp;boss.nsEventBoss=true;boss.nsMutation='RIFT WARDEN'}
+  openDialog('LIVE INVASION · RIFT WARDEN',[
+    'Command has detected an unstable rift signature above the sector.',
+    'A Rift Warden is breaking through. Destroy it before the invasion spreads.',
+    'The Warden carries a limited-time core reward. Good hunting, pilot.'
+  ],()=>{if(Game.state==='pause')Game.resume()});
 }
 function css(){
   const s=document.createElement('style');
@@ -430,7 +445,7 @@ function render(){
     const ev=eventInfo&&eventInfo.event;
     html='<p>Live global invasion. Every pilot can contribute eliminations to the shared server event.</p>';
     html+=ev?'<div class="ns2-card"><strong>'+safe(ev.title)+'</strong><small>'+safe(ev.description)+' · Ends '+safe(ev.endsAt)+'</small><div class="ns2-progress"><i style="width:'+Math.min(100,(ev.communityKills/ev.goal)*100)+'%"></i></div><small>Community '+ev.communityKills+' / '+ev.goal+' · Your kills '+S.event.kills+' / 20</small></div>':'<div class="ns2-note">Connect to a Python backend to load the live event.</div>';
-    html+='<div class="ns2-row"><button data-action="event-refresh">REFRESH EVENT</button><button data-action="event-claim" '+(!ev||S.event.kills<20||S.event.claimed?'disabled':'')+'>CLAIM 500 CREDITS</button></div>';
+    html+='<div class="ns2-row"><button data-action="event-refresh">REFRESH EVENT</button><button data-action="event-claim" '+(!ev||S.event.kills<20||S.event.claimed?'disabled':'')+'>CLAIM 500 CREDITS</button><button data-action="event-boss" '+(!ev||S.event.bossDefeated?'disabled':'')+'>'+(S.event.bossDefeated?'WARDEN DEFEATED':'FIGHT RIFT WARDEN')+'</button></div>';
   }else if(activeTab==='servers'){
     const savedUrl=localStorage.getItem('neonswarm.server-url')||location.origin;
     html='<p>Join a running Neon Swarm Python server. The host must be reachable over the same Wi-Fi or through a public IP/domain with the server port exposed.</p><div class="ns2-card"><div class="ns2-row"><label>Backend address <input id="ns2-server-url" style="width:min(380px,75vw)" value="'+safe(savedUrl)+'" placeholder="http://192.168.1.20:8000"></label><button data-action="server-refresh">FETCH SERVERS</button></div><div class="ns2-row"><input id="ns2-room-name" value="Neon squad" placeholder="Server name"><button data-action="server-host">HOST SERVER</button></div><p id="ns2-room-status">'+(room?'CONNECTED · '+safe(room.id):'Not connected')+'</p></div><div class="ns2-grid">';
@@ -466,6 +481,7 @@ async function runAction(action,value){
   else if(action==='server-leave')await leaveRoom(true)
   else if(action==='event-refresh')await refreshEvent()
   else if(action==='event-claim')claimEvent()
+  else if(action==='event-boss')startEventBoss()
   render();
 }
 function drawOverlay(){
@@ -527,7 +543,15 @@ function hooks(){
     if(enemy.dead&&!enemy.nsRound2Paid){
       enemy.nsRound2Paid=true;killHighlights.push({x:enemy.x,y:enemy.y,kind:enemy.k,t:performance.now()});if(killHighlights.length>40)killHighlights.shift();S.materials.scrap+=enemy.k==='boss'?12:1+(Math.random()<.35?1:0);
       if(enemy.k==='boss'){S.materials.crystal+=4;S.materials.core+=2;S.tradeInventory.push({id:'boss-'+Date.now(),name:'Swarm Core Shard',rarity:'LEGENDARY',kind:'equipment'})}
-      else if(Math.random()<.025)S.tradeInventory.push({id:'drop-'+Date.now(),name:'Mutation Residue',rarity:'RARE',kind:'collectible'});
+      if(enemy.nsEventBoss){
+        S.event.bossDefeated=true;S.tradeInventory.push({id:'warden-'+Date.now(),name:'Rift Warden Core',rarity:'MYTHIC',kind:'equipment'});reward(900);this.betweenWaves=true;save();
+        openDialog('RIFT WARDEN DEFEATED',[
+          'The Warden has collapsed. The rift is stabilizing.',
+          'Limited reward acquired: Rift Warden Core + 900 credits.',
+          'The invasion continues elsewhere. Return when the next signal appears.'
+        ],()=>{if(Game.state==='pause')Game.goMenu()});
+      }
+      else if(enemy.k!=='boss'&&Math.random()<.025)S.tradeInventory.push({id:'drop-'+Date.now(),name:'Mutation Residue',rarity:'RARE',kind:'collectible'});
       S.season.xp+=enemy.k==='boss'?40:5;S.event.kills++;
       if(enemy.nsExplode&&this.p&&Math.hypot(this.p.x-enemy.x,this.p.y-enemy.y)<95)this.p.hp=Math.max(1,this.p.hp-18);
       save();if(S.event.kills%5===0)contributeEvent();
@@ -580,6 +604,8 @@ function hooks(){
   };
   const oldOver=Game.over;
   Game.over=function(){saveReplay();return oldOver.apply(this,arguments)};
+  const oldGoMenu=Game.goMenu;
+  Game.goMenu=function(){saveReplay();return oldGoMenu.apply(this,arguments)};
   const oldSpawn=Game.spawnWave;
   Game.spawnWave=function(){
     oldSpawn.call(this);
