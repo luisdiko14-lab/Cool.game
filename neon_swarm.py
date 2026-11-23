@@ -22,6 +22,13 @@ import threading
 import time
 import traceback
 import webbrowser
+
+# PyInstaller --windowed can start with stdout/stderr unset on Windows.
+if getattr(sys, "frozen", False):
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = sys.stdout
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -32,10 +39,12 @@ from urllib.request import urlopen
 import auth as authlib
 
 if getattr(sys, "frozen", False):
-  APP_DIR = Path.home() / "Desktop" if sys.platform == "win32" else Path(sys.executable).resolve().parent
+  APP_DIR = Path(os.environ.get("NEON_SWARM_APP_DIR", Path(sys.executable).resolve().parent))
   APP_DIR.mkdir(parents=True, exist_ok=True)
+  RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
 else:
   APP_DIR = Path(__file__).resolve().parent
+  RESOURCE_DIR = APP_DIR
 
 ENV_FILE_KEYS = {"NEON_SWARM_DATA_KEY", "NEON_SWARM_ACCOUNT_DB", "NEON_SWARM_SAVE_DB"}
 
@@ -894,6 +903,59 @@ def save_saves(rows):
   authlib.write_encrypted_json(SAVES_DB, rows, DATA_KEY)
 
 
+# ---------------------------------------------------------------- multiplayer, marketplace and live events ---
+ROOM_LOCK = threading.RLock()
+ROOMS = {}
+ROOM_TTL = 30
+MARKET_LOCK = threading.RLock()
+MARKET_USERS = {}
+MARKET_LISTINGS = {}
+EVENT_LOCK = threading.Lock()
+EVENT_PROGRESS = {}
+CHALLENGE_LOCK = threading.Lock()
+CHALLENGES = []
+
+
+def clean_public_name(value, maximum=16):
+    name = re.sub(r"[^\w -]", "", str(value or "Pilot"), flags=re.UNICODE)[:maximum].strip()
+    return name or "Pilot"
+
+
+def prune_rooms():
+    now = time.time()
+    for room_id in list(ROOMS):
+        room = ROOMS[room_id]
+        for player_id in list(room["players"]):
+            if now - room["players"][player_id]["seen"] > ROOM_TTL:
+                del room["players"][player_id]
+        if not room["players"] or room["host"] not in room["players"]:
+            del ROOMS[room_id]
+
+
+def public_room(room):
+    players = [{
+        "id": player["id"], "name": player["name"], "x": player["x"], "y": player["y"],
+        "hp": player["hp"], "score": player["score"], "ready": player["ready"]
+    } for player in room["players"].values()]
+    return {"id": room["id"], "name": room["name"], "mode": room["mode"],
+            "maxPlayers": room["maxPlayers"], "players": len(players),
+            "createdAt": room["createdAt"], "playerList": players}
+
+
+def current_live_event():
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    event_id, title, description = [
+        ("rift-invasion", "Rift Invasion", "Eliminate invaders across every pilot server."),
+        ("core-hunt", "Core Fragment Hunt", "Recover fragments from the mutated swarm."),
+        ("citadel-defense", "Citadel Defense", "Push back the daily Citadel assault.")
+    ][int(time.strftime("%j", time.gmtime())) % 3]
+    key = today + ":" + event_id
+    with EVENT_LOCK:
+        progress = int(EVENT_PROGRESS.get(key, 0))
+    return {"id": key, "title": title, "description": description,
+            "goal": 250, "communityKills": progress, "endsAt": today + " 23:59 UTC"}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "NeonSwarm/2.0"
 
@@ -905,8 +967,173 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         for name, value in extra_headers:
             self.send_header(name, value)
+        if urlsplit(getattr(self, "path", "")).path.startswith("/api/"):
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Player-Token, X-Market-Token, X-Save-Token")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(data)
+
+    def send_json(self, code, value):
+        return self.send_body(code, json.dumps(value, separators=(",", ":")), "application/json")
+
+    def read_json(self, maximum=8192):
+        try:
+            size = int(self.headers.get("Content-Length", 0))
+            if not 0 < size <= maximum:
+                raise ValueError("bad request size")
+            value = json.loads(self.rfile.read(size))
+            if not isinstance(value, dict):
+                raise ValueError("JSON object required")
+            return value
+        except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+            raise ValueError("invalid JSON request")
+
+    def market_user(self):
+        token = self.headers.get("X-Market-Token", "")
+        with MARKET_LOCK:
+            return MARKET_USERS.get(token)
+
+    def room_player(self, room):
+        token = self.headers.get("X-Player-Token", "")
+        if not token:
+            token = parse_qs(urlsplit(self.path).query).get("token", [""])[0]
+        for player in room["players"].values():
+            if secrets.compare_digest(player["token"], token):
+                return player
+        return None
+
+    def room_request(self, path):
+        parts = [part for part in path.split("/") if part]
+        if len(parts) == 2 and parts[1] == "rooms":
+            data = self.read_json(4096)
+            name = clean_public_name(data.get("name", "Neon squad"), 30)
+            player_name = clean_public_name(data.get("playerName", "Pilot"))
+            maximum = max(2, min(8, int(data.get("maxPlayers", 4))))
+            room_id = secrets.token_hex(3).upper()
+            player_id = secrets.token_hex(4)
+            token = secrets.token_urlsafe(32)
+            room = {"id": room_id, "name": name, "mode": "co-op",
+                    "maxPlayers": maximum, "createdAt": int(time.time()),
+                    "host": player_id, "players": {
+                        player_id: {"id": player_id, "token": token, "name": player_name,
+                                    "seen": time.time(), "x": .5, "y": .8, "hp": 0,
+                                    "score": 0, "ready": True}}}
+            with ROOM_LOCK:
+                prune_rooms()
+                ROOMS[room_id] = room
+            return self.send_json(201, {"room": public_room(room), "playerId": player_id, "token": token})
+        if len(parts) < 3:
+            return self.send_json(404, {"error": "Room route not found"})
+        room_id = parts[2]
+        action = parts[3] if len(parts) > 3 else ""
+        with ROOM_LOCK:
+            prune_rooms()
+            room = ROOMS.get(room_id)
+            if not room:
+                return self.send_json(404, {"error": "Server no longer exists"})
+            if action == "join":
+                data = self.read_json(4096)
+                if len(room["players"]) >= room["maxPlayers"]:
+                    return self.send_json(409, {"error": "Server is full"})
+                player_id, token = secrets.token_hex(4), secrets.token_urlsafe(32)
+                room["players"][player_id] = {
+                    "id": player_id, "token": token, "name": clean_public_name(data.get("playerName")),
+                    "seen": time.time(), "x": .5, "y": .8, "hp": 0, "score": 0, "ready": True}
+                return self.send_json(200, {"room": public_room(room), "playerId": player_id, "token": token})
+            player = self.room_player(room)
+            if not player:
+                return self.send_json(401, {"error": "Invalid or expired pilot token"})
+            if action == "heartbeat":
+                data = self.read_json(4096)
+                player["seen"] = time.time()
+                player["x"] = max(0.0, min(1.0, float(data.get("x", .5))))
+                player["y"] = max(0.0, min(1.0, float(data.get("y", .8))))
+                player["hp"] = max(0, min(100000, int(data.get("hp", 0))))
+                player["score"] = max(0, min(9007199254740991, int(data.get("score", 0))))
+                return self.send_json(200, {"room": public_room(room), "players": public_room(room)["playerList"]})
+            if action == "leave":
+                del room["players"][player["id"]]
+                if not room["players"] or player["id"] == room["host"]:
+                    ROOMS.pop(room_id, None)
+                return self.send_json(200, {"ok": True})
+        return self.send_json(404, {"error": "Room action not found"})
+
+    def market_request(self, path):
+        if path == "/api/market/session":
+            data = self.read_json(4096)
+            token = secrets.token_urlsafe(36)
+            with MARKET_LOCK:
+                MARKET_USERS[token] = {"name": clean_public_name(data.get("name")), "balance": 1000,
+                                       "deliveries": []}
+            return self.send_json(201, {"token": token, "balance": 1000})
+        user = self.market_user()
+        if not user:
+            return self.send_json(401, {"error": "Create a marketplace pilot session first"})
+        if path == "/api/market/listings":
+            data = self.read_json(4096)
+            raw = data.get("item", {})
+            if not isinstance(raw, dict):
+                return self.send_json(400, {"error": "Invalid item"})
+            item_name = clean_public_name(raw.get("name", "Supply crate"), 40)
+            rarity = str(raw.get("rarity", "COMMON")).upper()
+            kind = str(raw.get("kind", "collectible")).lower()
+            if rarity not in {"COMMON", "RARE", "EPIC", "LEGENDARY", "MYTHIC"} or kind not in {"skin", "equipment", "collectible"}:
+                return self.send_json(400, {"error": "Unsupported market item"})
+            try:
+                price = max(1, min(100000, int(data.get("price", 0))))
+            except (TypeError, ValueError):
+                return self.send_json(400, {"error": "Invalid listing price"})
+            listing_id = secrets.token_hex(6)
+            seller_token = self.headers.get("X-Market-Token", "")
+            listing = {"id": listing_id, "seller": user["name"], "sellerToken": seller_token,
+                       "item": {"id": secrets.token_hex(8), "name": item_name, "rarity": rarity, "kind": kind},
+                       "price": price, "createdAt": int(time.time()), "status": "open"}
+            with MARKET_LOCK:
+                MARKET_LISTINGS[listing_id] = listing
+            return self.send_json(201, {"listing": {k: v for k, v in listing.items() if k != "sellerToken"}})
+        if path.startswith("/api/market/listings/") and path.endswith("/buy"):
+            listing_id = path.split("/")[4]
+            with MARKET_LOCK:
+                listing = MARKET_LISTINGS.get(listing_id)
+                if not listing or listing["status"] != "open":
+                    return self.send_json(404, {"error": "Listing is no longer available"})
+                buyer_token = self.headers.get("X-Market-Token", "")
+                if secrets.compare_digest(listing["sellerToken"], buyer_token):
+                    return self.send_json(409, {"error": "You cannot buy your own listing"})
+                if user["balance"] < listing["price"]:
+                    return self.send_json(409, {"error": "Insufficient marketplace credits"})
+                user["balance"] -= listing["price"]
+                seller = MARKET_USERS.get(listing["sellerToken"])
+                if seller is not None:
+                    seller["balance"] = min(1000000, seller["balance"] + listing["price"])
+                user["deliveries"].append(dict(listing["item"]))
+                listing["status"] = "sold"
+                listing["buyer"] = user["name"]
+            return self.send_json(200, {"ok": True, "item": listing["item"], "balance": user["balance"]})
+        if path == "/api/market/account/claim":
+            with MARKET_LOCK:
+                user["deliveries"] = []
+            return self.send_json(200, {"ok": True})
+        if path == "/api/market/account/withdraw":
+            with MARKET_LOCK:
+                balance = user["balance"]
+                user["balance"] = 0
+            return self.send_json(200, {"balance": balance})
+        return self.send_json(404, {"error": "Marketplace route not found"})
+
+    def event_request(self):
+        data = self.read_json(4096)
+        try:
+            kills = max(1, min(10, int(data.get("kills", 1))))
+        except (TypeError, ValueError):
+            return self.send_json(400, {"error": "Invalid contribution"})
+        event = current_live_event()
+        with EVENT_LOCK:
+            EVENT_PROGRESS[event["id"]] = int(EVENT_PROGRESS.get(event["id"], 0)) + kills
+            event["communityKills"] = EVENT_PROGRESS[event["id"]]
+        return self.send_json(200, {"event": event})
 
     def send_audio(self, data):
         start, end, status = 0, len(data) - 1, 200
@@ -1116,11 +1343,39 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_auth_page(authlib.render_authorize, user["username"], next_path)
         if path == "/api/auth":
             return self.auth_status()
+        if path == "/api/health":
+            return self.send_json(200, {"ok": True, "service": "neon-web-python", "port": self.server.server_address[1], "lanAddress": lan_ip()})
+        if path == "/api/rooms":
+            with ROOM_LOCK:
+                prune_rooms()
+                rows = [public_room(room) for room in ROOMS.values()]
+            return self.send_json(200, {"rooms": rows})
+        if path == "/api/events":
+            return self.send_json(200, {"event": current_live_event()})
+        if path == "/api/challenges":
+            with CHALLENGE_LOCK:
+                rows = [dict(challenge) for challenge in CHALLENGES[-50:]]
+            return self.send_json(200, {"challenges": rows})
+        if path == "/api/market/listings":
+            token = self.headers.get("X-Market-Token", "")
+            with MARKET_LOCK:
+                rows = []
+                for item in MARKET_LISTINGS.values():
+                    if item["status"] == "open":
+                        rows.append({"id": item["id"], "seller": item["seller"],
+                                     "item": item["item"], "price": item["price"],
+                                     "mine": bool(token and secrets.compare_digest(item["sellerToken"], token))})
+            return self.send_json(200, {"listings": rows})
+        if path == "/api/market/account":
+            user = self.market_user()
+            if not user:
+                return self.send_json(401, {"error": "Create a marketplace pilot session first"})
+            return self.send_json(200, {"balance": user["balance"], "deliveries": list(user["deliveries"])})
         if path in ("/", "/index.html"):
           try:
             scripts = []
-            for filename in ("neon_swarm_features.js", "neon_swarm_expansion.js", "neon_swarm_apex.js", "neon_swarm_ultimate.js"):
-              script_path = Path(__file__).resolve().with_name(filename)
+            for filename in ("neon_swarm_features.js", "neon_swarm_expansion.js", "neon_swarm_apex.js", "neon_swarm_ultimate.js", "neon_swarm_round2.js"):
+              script_path = RESOURCE_DIR / filename
               scripts.append(script_path.read_text(encoding="utf-8"))
           except OSError:
             return self.send_body(500, '{"error":"one or more game feature modules are unavailable"}')
@@ -1130,10 +1385,10 @@ class Handler(BaseHTTPRequestHandler):
           inline_scripts = "\n".join("<script>\n" + script + "\n</script>" for script in scripts)
           html = GAME_HTML.replace(feature_tag, inline_scripts)
           return self.send_body(200, html, "text/html")
-        if path in ("/neon_swarm_features.js", "/neon_swarm_expansion.js", "/neon_swarm_apex.js", "/neon_swarm_ultimate.js"):
+        if path in ("/neon_swarm_features.js", "/neon_swarm_expansion.js", "/neon_swarm_apex.js", "/neon_swarm_ultimate.js", "/neon_swarm_round2.js"):
           try:
             filename = path.rsplit("/", 1)[-1]
-            script = Path(__file__).resolve().with_name(filename).read_text(encoding="utf-8")
+            script = (RESOURCE_DIR / filename).read_text(encoding="utf-8")
             return self.send_body(200, script, "application/javascript")
           except OSError:
             return self.send_body(404, "// game feature module unavailable", "application/javascript")
@@ -1158,14 +1413,54 @@ class Handler(BaseHTTPRequestHandler):
           return self.send_body(200, json.dumps({"data": data}))
         if path == "/Raya(Slowed).mp3":
             try:
-                audio_path = Path(__file__).resolve().with_name("Raya(Slowed).mp3")
+                audio_path = RESOURCE_DIR / "Raya(Slowed).mp3"
                 return self.send_audio(audio_path.read_bytes())
             except OSError:
                 return self.send_body(404, '{"error":"audio not found"}')
         return self.send_body(404, '{"error":"not found"}')
 
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Player-Token, X-Market-Token, X-Save-Token")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_POST(self):
         path = urlsplit(self.path).path
+        if path.startswith("/api/rooms"):
+            try:
+                return self.room_request(path)
+            except (ValueError, TypeError, OverflowError):
+                return self.send_json(400, {"error": "Invalid room request"})
+        if path.startswith("/api/market/"):
+            try:
+                return self.market_request(path)
+            except (ValueError, TypeError, OverflowError):
+                return self.send_json(400, {"error": "Invalid marketplace request"})
+        if path == "/api/events/contribute":
+            try:
+                return self.event_request()
+            except (ValueError, TypeError, OverflowError):
+                return self.send_json(400, {"error": "Invalid event contribution"})
+        if path == "/api/challenges":
+            try:
+                data = self.read_json(8192)
+                name = clean_public_name(data.get("name", "Community challenge"), 32)
+                wave = max(1, min(60, int(data.get("wave", 10))))
+                density = max(1.0, min(2.0, float(data.get("density", 1))))
+                seed = max(1, min(2147483647, int(data.get("seed", 1))))
+                challenge = {"id": secrets.token_hex(6), "shareCode": secrets.token_hex(4).upper(),
+                             "name": name, "wave": wave, "density": density, "seed": seed,
+                             "author": clean_public_name(data.get("author", "Pilot")),
+                             "createdAt": int(time.time())}
+                with CHALLENGE_LOCK:
+                    CHALLENGES.append(challenge)
+                    del CHALLENGES[:-100]
+                return self.send_json(201, {"challenge": challenge})
+            except (ValueError, TypeError, OverflowError):
+                return self.send_json(400, {"error": "Invalid custom challenge"})
         if path == "/auth/logout":
             return self._logout()
         if path in ("/auth/register", "/auth/login", "/auth/authorize"):
@@ -1575,7 +1870,16 @@ def main():
     ap.add_argument("--gui", action="store_true", help="open the desktop game window")
     ap.add_argument("--gui-smoke-test", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--server", action="store_true", help="run only the game server")
+    ap.add_argument("--log-file", default="", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    if args.log_file:
+        try:
+            Path(args.log_file).parent.mkdir(parents=True, exist_ok=True)
+            log_stream = open(args.log_file, "a", encoding="utf-8", buffering=1)
+            sys.stdout = log_stream
+            sys.stderr = log_stream
+        except OSError:
+            pass
 
     host = "0.0.0.0" if args.lan else "127.0.0.1"  # nosec B104 -- LAN exposure requires explicit --lan opt-in
     is_executable = bool(getattr(sys, "frozen", False)) or Path(sys.argv[0]).suffix.lower() == ".exe"
