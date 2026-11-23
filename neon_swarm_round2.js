@@ -200,7 +200,8 @@ function drawReplayPreview(){
 }
 function marketHeaders(){return marketToken?{'Content-Type':'application/json','X-Market-Token':marketToken}:{'Content-Type':'application/json'}}
 async function ensureMarketSession(){
-  if(marketToken)return true;
+  if(marketToken){try{const check=await fetch('/api/market/account',{headers:marketHeaders()});if(check.ok)return true}catch(_){}}
+  marketToken='';localStorage.removeItem('neonswarm.market-token');
   const name=(localStorage.getItem('neonswarm.name')||'Pilot').slice(0,16);
   const response=await fetch('/api/market/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})});
   if(!response.ok)throw new Error('Marketplace service unavailable');
@@ -350,7 +351,7 @@ function createPanel(){
   panel.innerHTML='<div class="ns2-shell"><div class="ns2-head"><div><h2>NEON SWARM · ROUND 2</h2><p id="ns2-summary"></p></div><button id="ns2-close">CLOSE ✕</button></div><div class="ns2-tabs" id="ns2-tabs"></div><div id="ns2-content"></div></div>';
   document.body.append(panel);
   const tabs=[['story','Story'],['map','World Generator'],['drones','Companions'],['craft','Crafting Lab'],['mutations','Mutations'],['market','Marketplace'],['pass','Season Pass'],['replay','Replay Theater'],['creator','Game Creator'],['events','Live Events'],['servers','Servers']];
-  tabs.forEach(([id,label])=>{const b=document.createElement('button');b.textContent=label;b.dataset.tab=id;b.onclick=()=>{activeTab=id;render();if(id==='market')refreshMarket().catch(showError);if(id==='servers')refreshServers().catch(showError);if(id==='events')refreshEvent()};$('ns2-tabs')&&$('ns2-tabs').append(b)});
+  tabs.forEach(([id,label])=>{const b=document.createElement('button');b.textContent=label;b.dataset.tab=id;b.onclick=()=>{activeTab=id;render();if(id==='market')refreshMarket().catch(showError);if(id==='servers')refreshServers().catch(showError);if(id==='events')refreshEvent();if(id==='creator')refreshChallenges().catch(showError)};$('ns2-tabs')&&$('ns2-tabs').append(b)});
   $('ns2-close').onclick=closePanel;
   panel.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(b&&!b.disabled)runAction(b.dataset.action,b.dataset.value).catch(showError)});
   panel.addEventListener('change',e=>{if(e.target.id==='ns2-replay-range'){replayIndex=Number(e.target.value);drawOverlay()}});
@@ -527,14 +528,30 @@ function hooks(){
   };
   const oldUpdate=Game.update;
   Game.update=function(dt){
+    const before=new Map((this.enemies||[]).map(e=>[e,{x:e.x,y:e.y}]));
     const result=oldUpdate.call(this,dt);
     if(this.state==='play'&&this.p){
+      for(const enemy of this.enemies||[]){
+        const previous=before.get(enemy);
+        if(previous&&enemy.nsSpeed>1){
+          enemy.x=previous.x+(enemy.x-previous.x)*enemy.nsSpeed;
+          enemy.y=previous.y+(enemy.y-previous.y)*enemy.nsSpeed;
+        }
+        if(enemy.nsRegen>0&&!enemy.dead)enemy.hp=Math.min(enemy.mhp,enemy.hp+enemy.nsRegen*dt);
+      }
       tickDrones(dt);clampPlayerOffWalls();replayAccumulator+=dt;
       if(replayAccumulator>=.12){replayAccumulator=0;recordFrame()}
       if(S.mods.armor&&this.p.hp<this.p.maxHp&&Math.random()<dt*S.mods.armor*.025)this.p.hp=Math.min(this.p.maxHp,this.p.hp+1);
     }
     return result;
   };
+  if(typeof Game.hurt==='function'){
+    const oldHurt=Game.hurt;
+    Game.hurt=function(amount){
+      if(amount===undefined)return oldHurt.call(this,amount);
+      return oldHurt.call(this,Math.max(1,amount*(1-S.mods.armor*.08)));
+    };
+  }
   const oldClear=Game.clearWave;
   Game.clearWave=function(){
     const mission=activeMission(),wave=this.wave;
