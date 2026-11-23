@@ -1375,7 +1375,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/neon_swarm_features.js", "/neon_swarm_expansion.js", "/neon_swarm_apex.js", "/neon_swarm_ultimate.js", "/neon_swarm_round2.js"):
           try:
             filename = path.rsplit("/", 1)[-1]
-            script = Path(__file__).resolve().with_name(filename).read_text(encoding="utf-8")
+            script = (RESOURCE_DIR / filename).read_text(encoding="utf-8")
             return self.send_body(200, script, "application/javascript")
           except OSError:
             return self.send_body(404, "// game feature module unavailable", "application/javascript")
