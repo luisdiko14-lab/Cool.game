@@ -207,24 +207,24 @@ function drawReplayPreview(){
 }
 function marketHeaders(){return marketToken?{'Content-Type':'application/json','X-Market-Token':marketToken}:{'Content-Type':'application/json'}}
 async function ensureMarketSession(){
-  if(marketToken){try{const check=await fetch('/api/market/account',{headers:marketHeaders()});if(check.ok)return true}catch(_){}}
+  if(marketToken){try{const check=await fetch(await backendUrl('/api/market/account'),{headers:marketHeaders()});if(check.ok)return true}catch(_){}}
   marketToken='';localStorage.removeItem('neonswarm.market-token');
   const name=(localStorage.getItem('neonswarm.name')||'Pilot').slice(0,16);
-  const response=await fetch('/api/market/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})});
+  const response=await fetch(await backendUrl('/api/market/session'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})});
   if(!response.ok)throw new Error('Marketplace service unavailable');
   const data=await response.json();marketToken=data.token;localStorage.setItem('neonswarm.market-token',marketToken);return true;
 }
 async function refreshMarket(){
   await ensureMarketSession();
-  const [a,b]=await Promise.all([fetch('/api/market/account',{headers:marketHeaders()}),fetch('/api/market/listings')]);
+  const [a,b]=await Promise.all([fetch(await backendUrl('/api/market/account'),{headers:marketHeaders()}),fetch(await backendUrl('/api/market/listings'))]);
   if(!a.ok||!b.ok)throw new Error('Marketplace service unavailable');
   const account=await a.json(),listings=await b.json();
   if(Array.isArray(account.deliveries)&&account.deliveries.length){
     account.deliveries.forEach(item=>S.tradeInventory.push(item));
     save();
-    await fetch('/api/market/account/claim',{method:'POST',headers:marketHeaders(),body:'{}'});
+    await fetch(await backendUrl('/api/market/account/claim'),{method:'POST',headers:marketHeaders(),body:'{}'});
   }
-  if(account.balance>0){reward(account.balance);await fetch('/api/market/account/withdraw',{method:'POST',headers:marketHeaders(),body:'{}'});}
+  if(account.balance>0){reward(account.balance);await fetch(await backendUrl('/api/market/account/withdraw'),{method:'POST',headers:marketHeaders(),body:'{}'});}
   marketRows=listings.listings||[];render();
 }
 async function createMarketListing(index){
@@ -232,13 +232,13 @@ async function createMarketListing(index){
   await ensureMarketSession();
   const price=Math.max(1,Math.min(100000,Number(prompt('Set a credit price for '+item.name, '100'))||0));
   if(!price)return;
-  const response=await fetch('/api/market/listings',{method:'POST',headers:marketHeaders(),body:JSON.stringify({item:item,price:price})});
+  const response=await fetch(await backendUrl('/api/market/listings'),{method:'POST',headers:marketHeaders(),body:JSON.stringify({item:item,price:price})});
   const result=await response.json();if(!response.ok)throw new Error(result.error||'Could not list item');
   S.tradeInventory.splice(index,1);save();await refreshMarket();
 }
 async function buyMarketListing(id){
   await ensureMarketSession();
-  const response=await fetch('/api/market/listings/'+encodeURIComponent(id)+'/buy',{method:'POST',headers:marketHeaders(),body:'{}'});
+  const response=await fetch(await backendUrl('/api/market/listings/'+encodeURIComponent(id)+'/buy'),{method:'POST',headers:marketHeaders(),body:'{}'});
   const result=await response.json();if(!response.ok)throw new Error(result.error||'Purchase failed');
   await refreshMarket();
 }
@@ -257,13 +257,13 @@ async function discoverServerBase(){
   return url.origin;
 }
 async function refreshChallenges(){
-  const response=await fetch('/api/challenges',{cache:'no-store'});
+  const response=await fetch(await backendUrl('/api/challenges'),{cache:'no-store'});
   if(!response.ok)throw new Error('Challenge sharing service is unavailable');
   const data=await response.json();remoteChallenges=data.challenges||[];render();
 }
 async function shareChallenge(index){
   const challenge=S.customs[index];if(!challenge)throw new Error('Custom challenge not found');
-  const response=await fetch('/api/challenges',{method:'POST',headers:{'Content-Type':'application/json'},
+  const response=await fetch(await backendUrl('/api/challenges'),{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({...challenge,author:localStorage.getItem('neonswarm.name')||'Pilot'})});
   const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not share challenge');
   alert('Challenge shared! Code: '+data.challenge.shareCode);
@@ -315,12 +315,12 @@ async function leaveRoom(notify){
 }
 function currentEventName(){return eventInfo&&eventInfo.event&&eventInfo.event.id||dateKey()}
 async function refreshEvent(){
-  try{const r=await fetch('/api/events',{cache:'no-store'});if(r.ok){eventInfo=await r.json();if(S.event.id!==currentEventName())S.event={id:currentEventName(),kills:0,contributed:0,claimed:false,bossDefeated:false};save();render()}}catch(_){}
+  try{const r=await fetch(await backendUrl('/api/events'),{cache:'no-store'});if(r.ok){eventInfo=await r.json();if(S.event.id!==currentEventName())S.event={id:currentEventName(),kills:0,contributed:0,claimed:false,bossDefeated:false};save();render()}}catch(_){}
 }
 async function contributeEvent(){
   if(!eventInfo||!eventInfo.event)return;
   const now=Date.now();if(now-lastEventSend<8000)return;lastEventSend=now;
-  try{const r=await fetch('/api/events/contribute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kills:5})});if(r.ok)eventInfo=await r.json()}catch(_){}
+  try{const r=await fetch(await backendUrl('/api/events/contribute'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kills:5})});if(r.ok)eventInfo=await r.json()}catch(_){}
 }
 function claimEvent(){
   if(!eventInfo||!eventInfo.event||S.event.kills<20||S.event.claimed)return;
