@@ -211,8 +211,8 @@ internal sealed class UpdateForm : Form
             await pipe.ConnectAsync(2000);
             using var reader = new StreamReader(pipe, System.Text.Encoding.UTF8, false, 512, leaveOpen: true);
             await using var writer = new StreamWriter(pipe, new System.Text.UTF8Encoding(false), 512, leaveOpen: true) { AutoFlush = true };
-            await writer.WriteLineAsync("{\\"op\\":\\"closeForUpdate\\"}");
-            return await reader.ReadLineAsync() ?? "{\\"ok\\":false}";
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new { op = "closeForUpdate" }));
+            return await reader.ReadLineAsync() ?? JsonSerializer.Serialize(new { ok = false });
         }
         catch (Exception ex)
         {
