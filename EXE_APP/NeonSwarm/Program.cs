@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.IO.Pipes;
+using System.Reflection;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -310,7 +311,9 @@ internal sealed class MainForm : Form
 
     private void StartCompanions()
     {
-        StartCompanion("Neon_Swarm_Update_Checker_Background.exe", "--owner-pid", Environment.ProcessId.ToString());
+        string info = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "build.0";
+        string buildNumber = info.Contains("+build.", StringComparison.OrdinalIgnoreCase) ? info.Split("+build.", StringSplitOptions.None).Last() : "0";
+        StartCompanion("Neon_Swarm_Update_Checker_Background.exe", "--owner-pid", Environment.ProcessId.ToString(), "--build-number", buildNumber);
         StartCompanion("Neon_Swarm_Webview2_Background.exe", "--owner-pid", Environment.ProcessId.ToString());
         StartCompanion("Admin_Panel.exe", "--background");
     }

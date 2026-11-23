@@ -29,3 +29,19 @@ Or double-click EXE_APP\scripts\build.bat. To build the portable folder only, us
 The .NET SDK is installed on the build machine; global.json pins the SDK feature band. Build outputs are written to EXE_APP\dist. The installer build downloads the small Microsoft WebView2 Evergreen bootstrapper and uses WiX Toolset 6.
 
 The game Settings screen also contains Import/Export Progress controls. The JSON backup uses the same save keys as the web edition, so it can move pilot progress between the browser and desktop editions.
+
+
+## Resolution picker and background companions
+
+Opening Neon_Swarm.exe directly now opens Neon_Swarm_Pick.exe first. The picker offers 144P, 244P, 345P, 480P, 720P (recommended), 1080P, 2K (1440P) and 2160P (4K). These are internal game-render targets; they do not alter Windows display settings. Lower presets disable decorative VFX and animation effects while preserving core gameplay movement.
+
+The picker displays a boot-console sequence and starts Neon_Swarm.exe with the selected render options. The crash-recovery helper preserves that render profile when it retries the game.
+
+The Windows package includes:
+
+- Neon_Swarm_Update_Checker_Background.exe and its DLL — periodically checks the latest desktop release while the game is running, downloads the official Setup.exe, and asks before launching it.
+- Neon_Swarm_Webview2_Background.exe and its DLL — tray monitor for the WebView2 Runtime. The actual WebView2 rendering engine remains hosted by the game.
+- Admin_Panel.exe and its DLL — native GUI connected to the live game through a current-user-only named pipe. Closing the panel hides it in the notification area; the tray menu can reopen or exit it.
+- Neon_Swarm_Pick.exe and its DLL — startup resolution and render-profile picker.
+
+Admin commands are local gameplay overrides, not secure server administration. The password remains the one already defined by the existing game's Admin module.
