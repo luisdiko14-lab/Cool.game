@@ -54,8 +54,8 @@ jobs:
           $p = "EXE_APP/dist/Neon_Swarm"
           $required = @("$p/Neon_Swarm.exe","$p/Neon_Swarm_Crash_Handler.exe","$p/Neon_Swarm.dll","$p/Game/index.html","$p/Game/neon_swarm_features.js","$p/Game/neon_swarm_expansion.js","$p/Game/neon_swarm_apex.js","$p/Game/Raya(Slowed).mp3")
           foreach ($f in $required) { if (-not (Test-Path $f)) { throw "Missing build output: $f" } }
-          & "$p/Neon_Swarm.exe" --server-smoke-test
-          if ($LASTEXITCODE -ne 0) {
+          $smoke = Start-Process -FilePath "$p/Neon_Swarm.exe" -ArgumentList @("--server-smoke-test") -WorkingDirectory (Resolve-Path $p).Path -Wait -PassThru -WindowStyle Hidden
+          if ($smoke.ExitCode -ne 0) {
             $diagnostic = Join-Path $env:TEMP "NeonSwarm-SmokeTest.log"
             if (Test-Path $diagnostic) {
               Write-Host "Desktop host smoke-test exception:"
@@ -66,10 +66,10 @@ jobs:
               Write-Host "Desktop host crash log:"
               Get-Content $crashLog -Tail 80
             }
-            throw "Desktop local-server test failed."
+            throw "Desktop local-server test failed with exit code $($smoke.ExitCode)."
           }
-          & "$p/Neon_Swarm_Crash_Handler.exe" --smoke-test
-          if ($LASTEXITCODE -ne 0) { throw "Crash-handler smoke test failed." }
+          $helperTest = Start-Process -FilePath "$p/Neon_Swarm_Crash_Handler.exe" -ArgumentList @("--smoke-test") -WorkingDirectory (Resolve-Path $p).Path -Wait -PassThru -WindowStyle Hidden
+          if ($helperTest.ExitCode -ne 0) { throw "Crash-handler smoke test failed with exit code $($helperTest.ExitCode)." }
 
       - name: Install WiX Toolset 6
         working-directory: EXE_APP
