@@ -44,7 +44,7 @@ const missions = [
   {id:'core',title:'05 · HEART OF THE SWARM',subtitle:'Defeat the final storyline boss.',wave:60,lines:['This is it. The signal is the hive mind.','Destroy the Heart of the Swarm and end the invasion.'],done:'The Heart has gone dark. The Neon Swarm is over.'}
 ];
 let activeTab='story',panel=null,dialog=null,dialogDone=null,serverRows=[],marketRows=[],eventInfo=null;
-let pendingRun=null,runStartAt=0,replayFrames=[],replayAccumulator=0,replayTimer=null,replayIndex=0,replaySpeed=1,replayCamera='follow';
+let pendingRun=null,runStartAt=0,remoteChallenges=[],replayFrames=[],replayAccumulator=0,replayTimer=null,replayIndex=0,replaySpeed=1,replayCamera='follow';
 let droneClocks={},mutationClock=0,lastEventSend=0,room=null,roomTimer=null,remotePlayers=[],marketToken=localStorage.getItem('neonswarm.market-token')||'';
 let round2Overlay=null,overlayCtx=null,overlayScale=1,overlayWidth=0,overlayHeight=0,overlayRaf=0;
 const themes=['NEON RUINS','FROST GRID','VOID GARDEN','SOLAR FOUNDRY','ABYSSAL LAB'];
@@ -200,7 +200,8 @@ function drawReplayPreview(){
 }
 function marketHeaders(){return marketToken?{'Content-Type':'application/json','X-Market-Token':marketToken}:{'Content-Type':'application/json'}}
 async function ensureMarketSession(){
-  if(marketToken)return true;
+  if(marketToken){try{const check=await fetch('/api/market/account',{headers:marketHeaders()});if(check.ok)return true}catch(_){}}
+  marketToken='';localStorage.removeItem('neonswarm.market-token');
   const name=(localStorage.getItem('neonswarm.name')||'Pilot').slice(0,16);
   const response=await fetch('/api/market/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})});
   if(!response.ok)throw new Error('Marketplace service unavailable');
@@ -234,8 +235,35 @@ async function buyMarketListing(id){
   const result=await response.json();if(!response.ok)throw new Error(result.error||'Purchase failed');
   await refreshMarket();
 }
+async function discoverServerBase(){
+  let value=($('ns2-server-url')&&$('ns2-server-url').value.trim())||localStorage.getItem('neonswarm.server-url')||location.origin;
+  let url;try{url=new URL(value)}catch(_){url=new URL(location.origin)}
+  if((url.hostname==='127.0.0.1'||url.hostname==='localhost')&&url.origin===location.origin){
+    try{
+      const response=await fetch('/api/health',{cache:'no-store'});
+      if(response.ok){const info=await response.json();if(info.lanAddress&&info.port){
+        url=new URL(location.protocol==='https:'?'https://'+location.host:'http://'+info.lanAddress+':'+info.port);
+        if($('ns2-server-url'))$('ns2-server-url').value=url.origin;
+      }}
+    }catch(_){}
+  }
+  return url.origin;
+}
+async function refreshChallenges(){
+  const response=await fetch('/api/challenges',{cache:'no-store'});
+  if(!response.ok)throw new Error('Challenge sharing service is unavailable');
+  const data=await response.json();remoteChallenges=data.challenges||[];render();
+}
+async function shareChallenge(index){
+  const challenge=S.customs[index];if(!challenge)throw new Error('Custom challenge not found');
+  const response=await fetch('/api/challenges',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({...challenge,author:localStorage.getItem('neonswarm.name')||'Pilot'})});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not share challenge');
+  alert('Challenge shared! Code: '+data.challenge.shareCode);
+  await refreshChallenges();
+}
 async function refreshServers(){
-  const baseUrl=($('ns2-server-url')&&$('ns2-server-url').value.trim())||location.origin;
+  const baseUrl=await discoverServerBase();
   let url;
   try{url=new URL(baseUrl);if(!['http:','https:'].includes(url.protocol))throw new Error('Use an HTTP or HTTPS server URL')}catch(e){throw new Error('Enter a valid server address')}
   localStorage.setItem('neonswarm.server-url',url.origin);
@@ -244,7 +272,7 @@ async function refreshServers(){
   const data=await response.json();serverRows=data.rooms||[];render();
 }
 async function createServerRoom(){
-  const baseUrl=($('ns2-server-url')&&$('ns2-server-url').value.trim())||location.origin;
+  const baseUrl=await discoverServerBase();
   const url=new URL(baseUrl);
   const name=($('ns2-room-name')&&$('ns2-room-name').value.trim())||'Neon squad';
   const player=localStorage.getItem('neonswarm.name')||'Pilot';
@@ -254,7 +282,7 @@ async function createServerRoom(){
   localStorage.setItem('neonswarm.room',JSON.stringify(room));startRoomHeartbeat();render();
 }
 async function joinServerRoom(id){
-  const baseUrl=($('ns2-server-url')&&$('ns2-server-url').value.trim())||location.origin;
+  const baseUrl=await discoverServerBase();
   const url=new URL(baseUrl),player=localStorage.getItem('neonswarm.name')||'Pilot';
   const response=await fetch(url.origin+'/api/rooms/'+encodeURIComponent(id)+'/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({playerName:player})});
   const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not join server');
@@ -323,7 +351,7 @@ function createPanel(){
   panel.innerHTML='<div class="ns2-shell"><div class="ns2-head"><div><h2>NEON SWARM · ROUND 2</h2><p id="ns2-summary"></p></div><button id="ns2-close">CLOSE ✕</button></div><div class="ns2-tabs" id="ns2-tabs"></div><div id="ns2-content"></div></div>';
   document.body.append(panel);
   const tabs=[['story','Story'],['map','World Generator'],['drones','Companions'],['craft','Crafting Lab'],['mutations','Mutations'],['market','Marketplace'],['pass','Season Pass'],['replay','Replay Theater'],['creator','Game Creator'],['events','Live Events'],['servers','Servers']];
-  tabs.forEach(([id,label])=>{const b=document.createElement('button');b.textContent=label;b.dataset.tab=id;b.onclick=()=>{activeTab=id;render();if(id==='market')refreshMarket().catch(showError);if(id==='servers')refreshServers().catch(showError);if(id==='events')refreshEvent()};$('ns2-tabs')&&$('ns2-tabs').append(b)});
+  tabs.forEach(([id,label])=>{const b=document.createElement('button');b.textContent=label;b.dataset.tab=id;b.onclick=()=>{activeTab=id;render();if(id==='market')refreshMarket().catch(showError);if(id==='servers')refreshServers().catch(showError);if(id==='events')refreshEvent();if(id==='creator')refreshChallenges().catch(showError)};$('ns2-tabs')&&$('ns2-tabs').append(b)});
   $('ns2-close').onclick=closePanel;
   panel.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(b&&!b.disabled)runAction(b.dataset.action,b.dataset.value).catch(showError)});
   panel.addEventListener('change',e=>{if(e.target.id==='ns2-replay-range'){replayIndex=Number(e.target.value);drawOverlay()}});
@@ -385,8 +413,11 @@ function render(){
     if(!S.replays.length)html+='<div class="ns2-card"><strong>No replays saved</strong><small>Complete or quit a run to save its flight recorder data.</small></div>';
     html+='</div>';
   }else if(activeTab==='creator'){
-    html='<p>Build a custom challenge with a chosen starting wave, environment seed and enemy density. Challenges are saved on this device and can be replayed.</p><div class="ns2-card"><div class="ns2-row"><label>Starting wave <input id="ns2-custom-wave" type="number" min="1" max="60" value="10"></label><label>Enemy density <select id="ns2-custom-density"><option value="1">Normal</option><option value="1.5">High</option><option value="2">Extreme</option></select></label></div><div class="ns2-row"><label>Map seed <input id="ns2-custom-seed" type="number" value="'+Math.floor(Math.random()*999999)+'"></label><button data-action="custom-save">SAVE CHALLENGE</button></div></div><div class="ns2-grid">';
-    S.customs.forEach((x,i)=>{html+=card(x.name,'Wave '+x.wave+' · density '+x.density+' · seed '+x.seed,'custom-play',String(i),false,'PLAY CHALLENGE')});
+    html='<p>Build and play your own arena challenge. Share it to the Python server directory so other pilots can import it.</p><div class="ns2-card"><div class="ns2-row"><label>Starting wave <input id="ns2-custom-wave" type="number" min="1" max="60" value="10"></label><label>Enemy density <select id="ns2-custom-density"><option value="1">Normal</option><option value="1.5">High</option><option value="2">Extreme</option></select></label></div><div class="ns2-row"><label>Map seed <input id="ns2-custom-seed" type="number" value="'+Math.floor(Math.random()*999999)+'"></label><button data-action="custom-save">SAVE CHALLENGE</button><button data-action="challenge-refresh">FETCH SHARED</button></div></div><div class="ns2-grid">';
+    S.customs.forEach((x,i)=>{html+=card(x.name,'Wave '+x.wave+' · density '+x.density+' · seed '+x.seed,'custom-play',String(i),false,'PLAY')+'<button data-action="challenge-share" data-value="'+i+'">SHARE</button>'});
+    html+='</div><h3>Community challenges</h3><div class="ns2-grid">';
+    remoteChallenges.forEach(x=>{html+=card(x.name,'By '+x.author+' · Wave '+x.wave+' · density '+x.density+' · code '+x.shareCode,'challenge-import',x.id,false,'IMPORT')});
+    if(!remoteChallenges.length)html+='<div class="ns2-card"><strong>No shared challenges</strong><small>Publish one of your own to add the first entry.</small></div>';
     html+='</div>';
   }else if(activeTab==='events'){
     const ev=eventInfo&&eventInfo.event;
@@ -416,6 +447,9 @@ async function runAction(action,value){
   else if(action==='replay-stop'){if(replayTimer)clearInterval(replayTimer);replayTimer=null}
   else if(action==='custom-save'){const wave=Math.max(1,Math.min(60,Number($('ns2-custom-wave').value)||10)),density=Number($('ns2-custom-density').value)||1,seed=Math.max(1,Number($('ns2-custom-seed').value)||1);S.customs.unshift({name:'Custom challenge '+(S.customs.length+1),wave,density,seed});S.customs=S.customs.slice(0,10);save();render()}
   else if(action==='custom-play')startCustom(Number(value))
+  else if(action==='challenge-share')await shareChallenge(Number(value))
+  else if(action==='challenge-refresh')await refreshChallenges()
+  else if(action==='challenge-import'){const item=remoteChallenges.find(x=>x.id===value);if(item){S.customs.unshift({name:item.name,wave:item.wave,density:item.density,seed:item.seed,sharedCode:item.shareCode});S.customs=S.customs.slice(0,20);save();render()}}
   else if(action==='market-refresh')await refreshMarket()
   else if(action==='market-list')await createMarketListing(Number(value))
   else if(action==='market-buy')await buyMarketListing(value)
@@ -494,14 +528,30 @@ function hooks(){
   };
   const oldUpdate=Game.update;
   Game.update=function(dt){
+    const before=new Map((this.enemies||[]).map(e=>[e,{x:e.x,y:e.y}]));
     const result=oldUpdate.call(this,dt);
     if(this.state==='play'&&this.p){
+      for(const enemy of this.enemies||[]){
+        const previous=before.get(enemy);
+        if(previous&&enemy.nsSpeed>1){
+          enemy.x=previous.x+(enemy.x-previous.x)*enemy.nsSpeed;
+          enemy.y=previous.y+(enemy.y-previous.y)*enemy.nsSpeed;
+        }
+        if(enemy.nsRegen>0&&!enemy.dead)enemy.hp=Math.min(enemy.mhp,enemy.hp+enemy.nsRegen*dt);
+      }
       tickDrones(dt);clampPlayerOffWalls();replayAccumulator+=dt;
       if(replayAccumulator>=.12){replayAccumulator=0;recordFrame()}
       if(S.mods.armor&&this.p.hp<this.p.maxHp&&Math.random()<dt*S.mods.armor*.025)this.p.hp=Math.min(this.p.maxHp,this.p.hp+1);
     }
     return result;
   };
+  if(typeof Game.hurt==='function'){
+    const oldHurt=Game.hurt;
+    Game.hurt=function(amount){
+      if(amount===undefined)return oldHurt.call(this,amount);
+      return oldHurt.call(this,Math.max(1,amount*(1-S.mods.armor*.08)));
+    };
+  }
   const oldClear=Game.clearWave;
   Game.clearWave=function(){
     const mission=activeMission(),wave=this.wave;
