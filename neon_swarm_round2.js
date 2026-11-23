@@ -57,8 +57,8 @@ function generateMap(seed){
     obstacles.push({x,y,w,h,kind:rand()>.5?'crystal':'wall'});
   }
   const secrets=[];
-  for(let i=0;i<3;i++)secrets.push({x:55+rand()*Math.max(1,view.w-110),y:70+rand()*Math.max(1,view.h-140),found:false});
-  S.map={seed:seed||Math.floor(Math.random()*0xffffffff),theme,obstacles,secrets,found:[]};
+  for(let i=0;i<3;i++){const x=65+rand()*Math.max(1,view.w-130),y=80+rand()*Math.max(1,view.h-160),w=58+rand()*42,h=48+rand()*38;secrets.push({x,y,room:{x:x-w/2,y:y-h/2,w,h},path:{x1:35+rand()*Math.max(1,view.w-70),y1:35+rand()*Math.max(1,view.h-70),x2:x,y2:y}})}
+  S.map={seed:seed||Math.floor(Math.random()*0xffffffff),theme,obstacles,secrets,found:[],hiddenPaths:secrets.map(x=>x.path)};
   save();
 }
 function ensureMap(){
@@ -133,7 +133,7 @@ function seededMutation(enemy){
 function recordFrame(){
   if(!Game.p||Game.state!=='play')return;
   const v=core.getView(),p=Game.p;
-  replayFrames.push({t:Math.round((performance.now()-runStartAt)/100),x:p.x/Math.max(1,v.w),y:p.y/Math.max(1,v.h),hp:p.hp,score:Game.score,wave:Game.wave,enemies:(Game.enemies||[]).slice(0,60).map(e=>({x:e.x/Math.max(1,v.w),y:e.y/Math.max(1,v.h),k:e.k,hp:e.hp,mhp:e.mhp,mutation:e.nsMutation||''}))});
+  replayFrames.push({t:Math.round((performance.now()-runStartAt)/100),x:p.x/Math.max(1,v.w),y:p.y/Math.max(1,v.h),hp:p.hp,score:Game.score,wave:Game.wave,kills:killHighlights.slice(-8).map(k=>({x:k.x/Math.max(1,v.w),y:k.y/Math.max(1,v.h),kind:k.kind})),enemies:(Game.enemies||[]).slice(0,60).map(e=>({x:e.x/Math.max(1,v.w),y:e.y/Math.max(1,v.h),k:e.k,hp:e.hp,mhp:e.mhp,mutation:e.nsMutation||''}))});
   if(replayFrames.length>360)replayFrames.shift();
 }
 function saveReplay(){
@@ -152,7 +152,7 @@ function tickDrones(dt){
       if(droneClocks[id]>8&&p.hp<p.maxHp){droneClocks[id]=0;p.hp=Math.min(p.maxHp,p.hp+18);shout('MEDIC DRONE · +18 HULL','#6dffb0')}
     }else{
       droneClocks[id]=(droneClocks[id]||0)+dt;
-      if(droneClocks[id]>1.1){droneClocks[id]=0;let target=null,dist=170*170;
+      if(droneClocks[id]>1.1/(1+S.mods.rate*.07)){droneClocks[id]=0;let target=null,dist=170*170;
         (Game.enemies||[]).forEach(e=>{if(e.dead)return;const d=(e.x-dx)**2+(e.y-dy)**2;if(d<dist){dist=d;target=e}});
         if(target)Game.damage(target,id==='striker'?Math.max(10,26+Game.wave*2):16);
       }
@@ -201,6 +201,7 @@ function drawReplayPreview(){
   c.save();c.translate(w/2-px*zoom,h/2-py*zoom);c.scale(zoom,zoom);
   c.beginPath();c.arc(px,py,11,0,Math.PI*2);c.fillStyle='#fff';c.shadowBlur=18;c.shadowColor='#45eaff';c.fill();c.shadowBlur=0;
   f.enemies.forEach(e=>{c.beginPath();c.arc(e.x*w,e.y*h,e.k==='boss'?15:6,0,Math.PI*2);c.fillStyle=e.mutation?'#ffae52':'#ff409c';c.fill()});
+  (f.kills||[]).forEach(k=>{c.beginPath();c.arc(k.x*w,k.y*h,16,0,Math.PI*2);c.strokeStyle='#ffd35c';c.lineWidth=2;c.stroke();c.fillStyle='#ffd35c';c.font='bold 10px system-ui';c.fillText(k.kind==='boss'?'BOSS KILL':'KILL',k.x*w+8,k.y*h-8)});
   c.restore();
   c.fillStyle='#fff';c.font='bold 15px system-ui';c.fillText((replayCamera==='follow'?'FOLLOW CAM':'OVERVIEW')+' · WAVE '+f.wave+'  ·  SCORE '+f.score+'  ·  HULL '+Math.round(f.hp),18,26);
 }
@@ -477,7 +478,7 @@ function drawOverlay(){
     const colors={ 'NEON RUINS':'#30dff0','FROST GRID':'#90d8ff','VOID GARDEN':'#b27cff','SOLAR FOUNDRY':'#ff9a43','ABYSSAL LAB':'#55a8d8'};
     c.fillStyle=colors[S.map.theme]||'#36e0ed';c.globalAlpha=.035;c.fillRect(0,0,w,h);c.globalAlpha=1;
     (S.map.obstacles||[]).forEach(o=>{c.fillStyle=o.kind==='crystal'?'#44eaff18':'#a76bff20';c.strokeStyle=o.kind==='crystal'?'#57e8ff88':'#b47cff77';c.lineWidth=1.4;c.fillRect(o.x*sx,o.y*sy,o.w*sx,o.h*sy);c.strokeRect(o.x*sx,o.y*sy,o.w*sx,o.h*sy)});
-    (S.map.secrets||[]).forEach((q,i)=>{if(S.map.found.includes(i))return;c.beginPath();c.arc(q.x*sx,q.y*sy,8,0,Math.PI*2);c.strokeStyle='#ffc34d99';c.lineWidth=2;c.stroke()});
+    (S.map.secrets||[]).forEach((q,i)=>{const found=S.map.found.includes(i);if(!found){c.beginPath();c.arc(q.x*sx,q.y*sy,8,0,Math.PI*2);c.strokeStyle='#ffc34d99';c.lineWidth=2;c.stroke();return}if(q.room){c.fillStyle='#ffc34d12';c.strokeStyle='#ffc34d';c.setLineDash([5,4]);c.lineWidth=2;c.fillRect(q.room.x*sx,q.room.y*sy,q.room.w*sx,q.room.h*sy);c.strokeRect(q.room.x*sx,q.room.y*sy,q.room.w*sx,q.room.h*sy);c.setLineDash([])}if(q.path){c.beginPath();c.moveTo(q.path.x1*sx,q.path.y1*sy);c.lineTo(q.path.x2*sx,q.path.y2*sy);c.strokeStyle='#ffc34d';c.lineWidth=3;c.stroke()}});
     (Game.enemies||[]).forEach(e=>{if(!e.nsMutation||e.dead)return;c.beginPath();c.arc(e.x*sx,e.y*sy,e.r+7,0,Math.PI*2);c.strokeStyle='#ffad55';c.lineWidth=2;c.setLineDash([4,3]);c.stroke();c.setLineDash([]);c.fillStyle='#ffda9a';c.font='bold 9px system-ui';c.fillText(e.nsMutation,e.x*sx+e.r+5,e.y*sy-9)});
     if(Game.p&&S.drones.length)S.drones.forEach((id,i)=>{const a=Game.time*1.45+i*Math.PI*2/S.drones.length,x=(Game.p.x+Math.cos(a)*(34+i*11))*sx,y=(Game.p.y+Math.sin(a)*(34+i*11))*sy;c.beginPath();c.arc(x,y,6,0,Math.PI*2);c.fillStyle=id==='medic'?'#6dffb0':'#46e9ff';c.shadowBlur=12;c.shadowColor=c.fillStyle;c.fill();c.shadowBlur=0});
     remotePlayers.forEach(p=>{const x=Math.max(0,Math.min(1,p.x))*w,y=Math.max(0,Math.min(1,p.y))*h;c.beginPath();c.arc(x,y,8,0,Math.PI*2);c.fillStyle='#ff56b7';c.shadowBlur=15;c.shadowColor='#ff56b7';c.fill();c.shadowBlur=0;c.fillStyle='#fff';c.font='11px system-ui';c.fillText(p.name||'Pilot',x+10,y-8)});
@@ -502,7 +503,7 @@ function installOverlay(){
 function hooks(){
   const oldStart=Game.start;
   Game.start=function(){
-    runStartAt=performance.now();replayFrames=[];replayAccumulator=0;ensureMap();
+    runStartAt=performance.now();replayFrames=[];killHighlights=[];replayAccumulator=0;ensureMap();
     const result=oldStart.apply(this,arguments);
     if(pendingRun&&pendingRun.kind==='custom'){
       this.wave=pendingRun.challenge.wave;this.enemies=[];this.spawnWave();
@@ -524,7 +525,7 @@ function hooks(){
     const adjusted=amount*multiplier*(enemy.nsArmor?1-enemy.nsArmor:1);
     const result=oldDamage.call(this,enemy,adjusted);
     if(enemy.dead&&!enemy.nsRound2Paid){
-      enemy.nsRound2Paid=true;S.materials.scrap+=enemy.k==='boss'?12:1+(Math.random()<.35?1:0);
+      enemy.nsRound2Paid=true;killHighlights.push({x:enemy.x,y:enemy.y,kind:enemy.k,t:performance.now()});if(killHighlights.length>40)killHighlights.shift();S.materials.scrap+=enemy.k==='boss'?12:1+(Math.random()<.35?1:0);
       if(enemy.k==='boss'){S.materials.crystal+=4;S.materials.core+=2;S.tradeInventory.push({id:'boss-'+Date.now(),name:'Swarm Core Shard',rarity:'LEGENDARY',kind:'equipment'})}
       else if(Math.random()<.025)S.tradeInventory.push({id:'drop-'+Date.now(),name:'Mutation Residue',rarity:'RARE',kind:'collectible'});
       S.season.xp+=enemy.k==='boss'?40:5;S.event.kills++;
@@ -555,10 +556,15 @@ function hooks(){
   if(typeof Game.hurt==='function'){
     const oldHurt=Game.hurt;
     Game.hurt=function(amount){
-      if(amount===undefined)return oldHurt.call(this,amount);
-      return oldHurt.call(this,Math.max(1,amount*(1-S.mods.armor*.08)));
+      const incoming=amount===undefined?5:amount;
+      return oldHurt.call(this,Math.max(1,incoming*(1-S.mods.armor*.08)));
     };
   }
+  const oldControl=Game.control;
+  Game.control=function(dt){
+    if(this.p&&S.mods.rate>0)this.p.fireT-=dt*S.mods.rate*.07;
+    return oldControl.call(this,dt);
+  };
   const oldClear=Game.clearWave;
   Game.clearWave=function(){
     const mission=activeMission(),wave=this.wave;
