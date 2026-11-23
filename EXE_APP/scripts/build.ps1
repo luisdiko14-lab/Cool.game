@@ -65,20 +65,37 @@ try {
     foreach ($required in @(
         (Join-Path $publish "Neon_Swarm.exe"),
         (Join-Path $publish "Neon_Swarm_Crash_Handler.exe"),
-        (Join-Path $publish "Neon_Swarm_Pick.exe"),
-        (Join-Path $publish "Admin_Panel.exe"),
-        (Join-Path $publish "Neon_Swarm_Update_Checker_Background.exe"),
-        (Join-Path $publish "Neon_Swarm_Webview2_Background.exe"),
+        (Join-Path $publish "neon_web_python.exe"),
         (Join-Path $publish "Game\index.html")
     )) {
         if (-not (Test-Path $required)) { throw "Required publish output is missing: $required" }
+    }
+
+    Write-Host "[3/5] Publishing resolution picker, Admin Panel and background services..." -ForegroundColor Cyan
+    $extraProjects = @(
+        "Picker/Picker.csproj",
+        "AdminPanel/AdminPanel.csproj",
+        "UpdateChecker/UpdateChecker.csproj",
+        "WebViewBackground/WebViewBackground.csproj"
+    )
+    foreach ($project in $extraProjects) {
+        & dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=true -o $publish
+        if ($LASTEXITCODE -ne 0) { throw "Publish failed: $project" }
+    }
+    foreach ($required in @(
+        (Join-Path $publish "Neon_Swarm_Pick.exe"),
+        (Join-Path $publish "Admin_Panel.exe"),
+        (Join-Path $publish "Neon_Swarm_Update_Checker_Background.exe"),
+        (Join-Path $publish "Neon_Swarm_Webview2_Background.exe")
+    )) {
+        if (-not (Test-Path $required)) { throw "Required companion output is missing: $required" }
     }
     if ($SkipInstaller) {
         Write-Host "Portable build ready: $publish" -ForegroundColor Green
         return
     }
 
-    Write-Host "[3/4] Publishing resolution picker, Admin Panel and background services..." -ForegroundColor Cyan
+ -ForegroundColor Cyan
     $extraProjects = @(
         "Picker/Picker.csproj",
         "AdminPanel/AdminPanel.csproj",
@@ -90,7 +107,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Publish failed: $project" }
     }
 
-    Write-Host "[3/4] Preparing WiX Toolset 6 and WebView2..." -ForegroundColor Cyan
+    Write-Host "[4/5] Preparing WiX Toolset 6 and WebView2..." -ForegroundColor Cyan
     if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
         & dotnet tool install --global wix --version 6.0.0
         if ($LASTEXITCODE -ne 0) { throw "Could not install WiX Toolset 6." }
@@ -114,7 +131,7 @@ try {
     & wix build -arch x64 -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext -d "BundleVersion=1.0.$buildNumber.0" -d "MsiPath=$msi" -d "WebView2Installer=$runtime" "Installer/Bundle/Bundle.wxs" -out $setup
     if ($LASTEXITCODE -ne 0) { throw "WiX could not create Setup.exe." }
 
-    Write-Host "[4/4] Creating the complete portable ZIP..." -ForegroundColor Cyan
+    Write-Host "[5/5] Creating the complete portable ZIP..." -ForegroundColor Cyan
     $portable = Join-Path $dist "Neon_Swarm_Portable.zip"
     Remove-Item -LiteralPath $portable -Force -ErrorAction SilentlyContinue
     Compress-Archive -Path (Join-Path $publish "*") -DestinationPath $portable -CompressionLevel Optimal
