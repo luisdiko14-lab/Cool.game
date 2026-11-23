@@ -88,6 +88,7 @@ jobs:
         run: |
           $assets = @("neon_swarm_features.js","neon_swarm_expansion.js","neon_swarm_apex.js","neon_swarm_ultimate.js","neon_swarm_round2.js","Raya(Slowed).mp3")
           $pyInstallerArgs = @("-m","PyInstaller","--noconfirm","--clean","--onefile","--windowed","--name","neon_web_python","--distpath","EXE_APP/dist/Neon_Swarm","--workpath","EXE_APP/dist/python-work","--specpath","EXE_APP/dist/python-spec","--collect-all","cryptography","--hidden-import","auth")
+          $pyInstallerArgs += @("--add-data","public;public")
           foreach ($asset in $assets) {
             if (-not (Test-Path $asset)) { throw "Missing Python host asset: $asset" }
             $pyInstallerArgs += @("--add-data","$asset;.")
