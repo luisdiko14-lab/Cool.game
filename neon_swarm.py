@@ -1335,7 +1335,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/auth":
             return self.auth_status()
         if path == "/api/health":
-            return self.send_json(200, {"ok": True, "service": "neon-web-python", "port": self.server.server_address[1]})
+            return self.send_json(200, {"ok": True, "service": "neon-web-python", "port": self.server.server_address[1], "lanAddress": lan_ip()})
         if path == "/api/rooms":
             with ROOM_LOCK:
                 prune_rooms()
