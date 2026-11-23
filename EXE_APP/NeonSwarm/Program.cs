@@ -395,9 +395,9 @@ internal sealed class GameServer : IDisposable
         if (c.Request.HttpMethod == "GET")
         {
             await _storage.WaitAsync(token);
-            List<Score> rows;
-            try { rows = ReadScores(); } finally { _storage.Release(); }
-            await Text(c, JsonSerializer.Serialize(new { scores = rows }), "application/json", 200, token);
+            List<Score> readRows;
+            try { readRows = ReadScores(); } finally { _storage.Release(); }
+            await Text(c, JsonSerializer.Serialize(new { scores = readRows }), "application/json", 200, token);
             return;
         }
         if (c.Request.HttpMethod != "POST") { await Text(c, "Method not allowed", "text/plain", 405, token); return; }
@@ -427,8 +427,8 @@ internal sealed class GameServer : IDisposable
     {
         if (c.Request.HttpMethod == "GET")
         {
-            string id = c.Request.Headers["X-Save-Token"] ?? "";
-            if (!Regex.IsMatch(id, "^[a-f0-9]{32}$", RegexOptions.CultureInvariant))
+            string readToken = c.Request.Headers["X-Save-Token"] ?? "";
+            if (!Regex.IsMatch(readToken, "^[a-f0-9]{32}$", RegexOptions.CultureInvariant))
             { await Text(c, "{\"error\":\"Invalid save token\"}", "application/json", 400, token); return; }
             await _storage.WaitAsync(token);
             string json = "{}";
