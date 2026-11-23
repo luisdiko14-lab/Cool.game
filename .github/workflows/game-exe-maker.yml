@@ -75,13 +75,13 @@ jobs:
         shell: pwsh
         run: |
           $assets = @("neon_swarm_features.js","neon_swarm_expansion.js","neon_swarm_apex.js","neon_swarm_ultimate.js","neon_swarm_round2.js","Raya(Slowed).mp3")
-          $args = @("-m","PyInstaller","--noconfirm","--clean","--onefile","--windowed","--name","neon_web_python","--distpath","EXE_APP/dist/Neon_Swarm","--workpath","EXE_APP/dist/python-work","--specpath","EXE_APP/dist/python-spec","--collect-all","cryptography","--hidden-import","auth")
+          $pyInstallerArgs = @("-m","PyInstaller","--noconfirm","--clean","--onefile","--windowed","--name","neon_web_python","--distpath","EXE_APP/dist/Neon_Swarm","--workpath","EXE_APP/dist/python-work","--specpath","EXE_APP/dist/python-spec","--collect-all","cryptography","--hidden-import","auth")
           foreach ($asset in $assets) {
             if (-not (Test-Path $asset)) { throw "Missing Python host asset: $asset" }
-            $args += @("--add-data","$asset;.")
+            $pyInstallerArgs += @("--add-data","$asset;.")
           }
-          $args += "neon_swarm.py"
-          python @args
+          $pyInstallerArgs += "neon_swarm.py"
+          python @pyInstallerArgs
           if ($LASTEXITCODE -ne 0) { throw "neon_web_python.exe packaging failed." }
           if (-not (Test-Path "EXE_APP/dist/Neon_Swarm/neon_web_python.exe")) { throw "neon_web_python.exe was not produced." }
 
