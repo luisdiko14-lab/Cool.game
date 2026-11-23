@@ -25,6 +25,43 @@ try {
     & dotnet publish $handlerProject -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=true -o $publish
     if ($LASTEXITCODE -ne 0) { throw "Crash handler publish failed." }
 
+    Write-Host "[3/5] Building the background Python game server..." -ForegroundColor Cyan
+    $repoRoot = Split-Path -Parent $exeApp
+    $pythonEntry = Join-Path $repoRoot "neon_swarm.py"
+    $pythonRequirements = Join-Path $exeApp "PythonHost\requirements.txt"
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+        throw "Python 3.12 is required to build neon_web_python.exe."
+    }
+    & python --version
+    & python -m pip install --disable-pip-version-check -r $pythonRequirements
+    if ($LASTEXITCODE -ne 0) { throw "Python host dependencies could not be installed." }
+    $pythonArgs = @(
+        "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--windowed",
+        "--name", "neon_web_python", "--distpath", $publish,
+        "--workpath", (Join-Path $dist "python-work"),
+        "--specpath", (Join-Path $dist "python-spec"),
+        "--collect-all", "cryptography", "--hidden-import", "auth"
+    )
+    foreach ($asset in @(
+        "neon_swarm_features.js",
+        "neon_swarm_expansion.js",
+        "neon_swarm_apex.js",
+        "neon_swarm_ultimate.js",
+        "neon_swarm_round2.js",
+        "Raya(Slowed).mp3"
+    )) {
+        $assetPath = Join-Path $repoRoot $asset
+        if (-not (Test-Path $assetPath)) { throw "Python server asset is missing: $assetPath" }
+        $pythonArgs += @("--add-data", "$assetPath;.")
+    }
+    $pythonArgs += $pythonEntry
+    Push-Location $repoRoot
+    try {
+        & python @pythonArgs
+        if ($LASTEXITCODE -ne 0) { throw "neon_web_python.exe packaging failed." }
+    }
+    finally { Pop-Location }
+
     foreach ($required in @(
         (Join-Path $publish "Neon_Swarm.exe"),
         (Join-Path $publish "Neon_Swarm_Crash_Handler.exe"),
