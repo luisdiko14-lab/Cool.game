@@ -17,15 +17,15 @@ New-Item -ItemType Directory -Force -Path $publish | Out-Null
 
 Push-Location $exeApp
 try {
-    Write-Host "[1/4] Publishing Neon_Swarm.exe with .NET 10..." -ForegroundColor Cyan
+    Write-Host "[1/6] Publishing Neon_Swarm.exe with .NET 10..." -ForegroundColor Cyan
     & dotnet publish $gameProject -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=true -o $publish
     if ($LASTEXITCODE -ne 0) { throw "Neon_Swarm.exe publish failed." }
 
-    Write-Host "[2/4] Publishing the crash recovery helper..." -ForegroundColor Cyan
+    Write-Host "[2/6] Publishing the crash recovery helper..." -ForegroundColor Cyan
     & dotnet publish $handlerProject -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=true -o $publish
     if ($LASTEXITCODE -ne 0) { throw "Crash handler publish failed." }
 
-    Write-Host "[3/5] Building the background Python game server..." -ForegroundColor Cyan
+    Write-Host "[3/6] Building the background Python game server..." -ForegroundColor Cyan
     $repoRoot = Split-Path -Parent $exeApp
     $pythonEntry = Join-Path $repoRoot "neon_swarm.py"
     $pythonRequirements = Join-Path $exeApp "PythonHost\requirements.txt"
@@ -71,7 +71,7 @@ try {
         if (-not (Test-Path $required)) { throw "Required publish output is missing: $required" }
     }
 
-    Write-Host "[3/5] Publishing resolution picker, Admin Panel and background services..." -ForegroundColor Cyan
+    Write-Host "[4/6] Publishing resolution picker, Admin Panel and background services..." -ForegroundColor Cyan
     $extraProjects = @(
         "Picker/Picker.csproj",
         "AdminPanel/AdminPanel.csproj",
@@ -95,7 +95,7 @@ try {
         return
     }
 
-    Write-Host "[4/5] Preparing WiX Toolset 6 and WebView2..." -ForegroundColor Cyan
+    Write-Host "[5/6] Preparing WiX Toolset 6 and WebView2..." -ForegroundColor Cyan
     if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
         & dotnet tool install --global wix --version 6.0.0
         if ($LASTEXITCODE -ne 0) { throw "Could not install WiX Toolset 6." }
@@ -119,7 +119,7 @@ try {
     & wix build -arch x64 -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext -d "BundleVersion=1.0.$buildNumber.0" -d "MsiPath=$msi" -d "WebView2Installer=$runtime" "Installer/Bundle/Bundle.wxs" -out $setup
     if ($LASTEXITCODE -ne 0) { throw "WiX could not create Setup.exe." }
 
-    Write-Host "[5/5] Creating the complete portable ZIP..." -ForegroundColor Cyan
+    Write-Host "[6/6] Creating the complete portable ZIP..." -ForegroundColor Cyan
     $portable = Join-Path $dist "Neon_Swarm_Portable.zip"
     Remove-Item -LiteralPath $portable -Force -ErrorAction SilentlyContinue
     Compress-Archive -Path (Join-Path $publish "*") -DestinationPath $portable -CompressionLevel Optimal
