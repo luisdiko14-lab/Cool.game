@@ -234,8 +234,22 @@ async function buyMarketListing(id){
   const result=await response.json();if(!response.ok)throw new Error(result.error||'Purchase failed');
   await refreshMarket();
 }
+async function discoverServerBase(){
+  let value=($('ns2-server-url')&&$('ns2-server-url').value.trim())||localStorage.getItem('neonswarm.server-url')||location.origin;
+  let url;try{url=new URL(value)}catch(_){url=new URL(location.origin)}
+  if((url.hostname==='127.0.0.1'||url.hostname==='localhost')&&url.origin===location.origin){
+    try{
+      const response=await fetch('/api/health',{cache:'no-store'});
+      if(response.ok){const info=await response.json();if(info.lanAddress&&info.port){
+        url=new URL(location.protocol==='https:'?'https://'+location.host:'http://'+info.lanAddress+':'+info.port);
+        if($('ns2-server-url'))$('ns2-server-url').value=url.origin;
+      }}
+    }catch(_){}
+  }
+  return url.origin;
+}
 async function refreshServers(){
-  const baseUrl=($('ns2-server-url')&&$('ns2-server-url').value.trim())||location.origin;
+  const baseUrl=await discoverServerBase();
   let url;
   try{url=new URL(baseUrl);if(!['http:','https:'].includes(url.protocol))throw new Error('Use an HTTP or HTTPS server URL')}catch(e){throw new Error('Enter a valid server address')}
   localStorage.setItem('neonswarm.server-url',url.origin);
@@ -244,7 +258,7 @@ async function refreshServers(){
   const data=await response.json();serverRows=data.rooms||[];render();
 }
 async function createServerRoom(){
-  const baseUrl=($('ns2-server-url')&&$('ns2-server-url').value.trim())||location.origin;
+  const baseUrl=await discoverServerBase();
   const url=new URL(baseUrl);
   const name=($('ns2-room-name')&&$('ns2-room-name').value.trim())||'Neon squad';
   const player=localStorage.getItem('neonswarm.name')||'Pilot';
@@ -254,7 +268,7 @@ async function createServerRoom(){
   localStorage.setItem('neonswarm.room',JSON.stringify(room));startRoomHeartbeat();render();
 }
 async function joinServerRoom(id){
-  const baseUrl=($('ns2-server-url')&&$('ns2-server-url').value.trim())||location.origin;
+  const baseUrl=await discoverServerBase();
   const url=new URL(baseUrl),player=localStorage.getItem('neonswarm.name')||'Pilot';
   const response=await fetch(url.origin+'/api/rooms/'+encodeURIComponent(id)+'/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({playerName:player})});
   const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not join server');
