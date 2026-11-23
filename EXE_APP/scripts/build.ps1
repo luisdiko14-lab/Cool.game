@@ -43,9 +43,9 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Could not install WiX Toolset 6." }
         $env:PATH = "$env:PATH;$([Environment]::GetFolderPath('UserProfile'))\.dotnet\tools"
     }
-    & wix extension add -g WixToolset.UI.wixext
+    & wix extension add -g WixToolset.UI.wixext/6.0.0
     if ($LASTEXITCODE -ne 0) { throw "Could not add the WiX UI extension." }
-    & wix extension add -g WixToolset.BootstrapperApplications.wixext
+    & wix extension add -g WixToolset.BootstrapperApplications.wixext/6.0.0
     if ($LASTEXITCODE -ne 0) { throw "Could not add the WiX bootstrapper extension." }
 
     $runtime = Join-Path $dist "MicrosoftEdgeWebView2Setup.exe"
