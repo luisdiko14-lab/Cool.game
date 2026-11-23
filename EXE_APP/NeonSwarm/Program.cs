@@ -305,7 +305,7 @@ internal sealed class MainForm : Form
             core.Settings.IsStatusBarEnabled = false;
             core.Settings.IsZoomControlEnabled = false;
             core.NavigationCompleted += (_, a) =>
-                _status.Text = a.IsSuccess ? "OFFLINE READY  •  LOCAL SAVES AND LEADERBOARD ENABLED"
+                _status.Text = a.IsSuccess ? "PYTHON HOST READY  •  LOCAL + LAN SERVER ACTIVE"
                     : "GAME PAGE DID NOT LOAD  •  PRESS RELOAD TO RETRY";
             core.DocumentTitleChanged += (_, _) =>
             {
@@ -329,7 +329,7 @@ internal sealed class MainForm : Form
                 "&vfx=" + (_launchOptions.Vfx ? "on" : "off") +
                 "&animations=" + (_launchOptions.Animations ? "on" : "off");
             core.Navigate(_server.BaseUrl + query);
-            _status.Text = "OFFLINE READY  •  LOCAL SAVES AND LEADERBOARD ENABLED";
+            _status.Text = "PYTHON HOST READY  •  LOCAL + LAN SERVER ACTIVE";
         }
         catch (Exception ex)
         {
