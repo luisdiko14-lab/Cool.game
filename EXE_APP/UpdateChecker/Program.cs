@@ -35,6 +35,7 @@ internal sealed class UpdateForm : Form
     private readonly HttpClient _http = new();
     private bool _closing;
     private bool _promptOpen;
+    private volatile bool _launchingInstaller;
 
     public UpdateForm(int ownerPid, int currentBuild)
     {
@@ -90,7 +91,7 @@ internal sealed class UpdateForm : Form
             await owner.WaitForExitAsync();
         }
         catch { }
-        if (!_closing && IsHandleCreated) BeginInvoke(Close);
+        if (!_closing && !_launchingInstaller && IsHandleCreated) BeginInvoke(Close);
     }
 
     private async Task CheckForUpdateAsync(bool manual)
@@ -151,12 +152,71 @@ internal sealed class UpdateForm : Form
             await using (FileStream destination = File.Create(installer))
                 await source.CopyToAsync(destination);
 
+            DialogResult install = MessageBox.Show(
+                "The update has been downloaded. Close Neon Swarm and launch Setup now?",
+                "Neon Swarm Update", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (install != DialogResult.Yes)
+            {
+                _tray.ShowBalloonTip(3000, "Neon Swarm update ready", "The installer is saved in LocalAppData\\NeonSwarm\\Updates.", ToolTipIcon.Info);
+                return;
+            }
+
+            _launchingInstaller = true;
+            string shutdown = await RequestGameShutdownAsync();
+            bool shutdownAccepted = false;
+            try
+            {
+                using JsonDocument response = JsonDocument.Parse(shutdown);
+                shutdownAccepted = response.RootElement.TryGetProperty("ok", out JsonElement ok) && ok.GetBoolean();
+            }
+            catch { }
+            if (!shutdownAccepted)
+            {
+                _launchingInstaller = false;
+                MessageBox.Show("Neon Swarm could not close automatically. Close the game manually, then run:\n\n" + installer,
+                    "Neon Swarm Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                using Process owner = Process.GetProcessById(_ownerPid);
+                await owner.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+            }
+            catch (TimeoutException)
+            {
+                _launchingInstaller = false;
+                MessageBox.Show("Neon Swarm is still running. Close it manually and run the downloaded Setup wizard.",
+                    "Neon Swarm Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            catch { }
+
             Process.Start(new ProcessStartInfo(installer) { UseShellExecute = true });
-            _tray.ShowBalloonTip(2500, "Neon Swarm", "The setup wizard has been launched.", ToolTipIcon.Info);
+            _timer.Stop();
+            BeginInvoke(Close);
         }
         catch (Exception ex)
         {
             if (manual) _tray.ShowBalloonTip(3500, "Update check failed", ex.Message, ToolTipIcon.Warning);
+        }
+    }
+
+    private async Task<string> RequestGameShutdownAsync()
+    {
+        try
+        {
+            using var pipe = new System.IO.Pipes.NamedPipeClientStream(
+                ".", "NeonSwarmGameAdmin", System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+            await pipe.ConnectAsync(2000);
+            using var reader = new StreamReader(pipe, System.Text.Encoding.UTF8, false, 512, leaveOpen: true);
+            await using var writer = new StreamWriter(pipe, new System.Text.UTF8Encoding(false), 512, leaveOpen: true) { AutoFlush = true };
+            await writer.WriteLineAsync("{\\"op\\":\\"closeForUpdate\\"}");
+            return await reader.ReadLineAsync() ?? "{\\"ok\\":false}";
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { ok = false, message = ex.Message });
         }
     }
 

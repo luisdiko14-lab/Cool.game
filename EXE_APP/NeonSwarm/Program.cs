@@ -361,6 +361,17 @@ internal sealed class MainForm : Form
         try
         {
             using JsonDocument request = JsonDocument.Parse(requestJson);
+            if (request.RootElement.TryGetProperty("op", out JsonElement operation) &&
+                operation.ValueKind == JsonValueKind.String &&
+                string.Equals(operation.GetString(), "closeForUpdate", StringComparison.Ordinal))
+            {
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(900);
+                    if (!IsDisposed && IsHandleCreated) BeginInvoke(new Action(Close));
+                });
+                return JsonSerializer.Serialize(new { ok = true, message = "Neon Swarm is closing for its update." });
+            }
             string script = "window.NeonSwarmDesktopAdmin ? window.NeonSwarmDesktopAdmin.handle(" +
                 request.RootElement.GetRawText() + ") : {ok:false,message:'The game page is not ready.'};";
             if (IsDisposed || !IsHandleCreated || _browser.CoreWebView2 is null)
