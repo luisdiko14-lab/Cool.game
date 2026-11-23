@@ -5,10 +5,6 @@
   if (!core) return;
 
   const { Game, Profile, Input, FX, Sfx, TYPES, MAX_WAVE, canvas } = core;
-  
-exit..sjsf
-  dja
-dejavu exit 198182
 
   // Keep combat feedback readable: preserve wave/boss/timer announcements,
   // but rate-limit the many optional reward and kill notifications.
