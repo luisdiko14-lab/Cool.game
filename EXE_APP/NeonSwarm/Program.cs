@@ -89,6 +89,8 @@ internal static class Program
         catch (Exception ex)
         {
             CrashLog.Write("Desktop server smoke test failed", ex);
+            Console.Error.WriteLine("Desktop server smoke test failed:");
+            Console.Error.WriteLine(ex);
             return 1;
         }
     }
