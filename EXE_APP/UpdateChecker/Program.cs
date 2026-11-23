@@ -166,8 +166,8 @@ internal sealed class UpdateForm : Form
             bool shutdownAccepted = false;
             try
             {
-                using JsonDocument response = JsonDocument.Parse(shutdown);
-                shutdownAccepted = response.RootElement.TryGetProperty("ok", out JsonElement ok) && ok.GetBoolean();
+                using JsonDocument shutdownResponse = JsonDocument.Parse(shutdown);
+                shutdownAccepted = shutdownResponse.RootElement.TryGetProperty("ok", out JsonElement ok) && ok.GetBoolean();
             }
             catch { }
             if (!shutdownAccepted)
