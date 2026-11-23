@@ -57,8 +57,8 @@ function generateMap(seed){
     obstacles.push({x,y,w,h,kind:rand()>.5?'crystal':'wall'});
   }
   const secrets=[];
-  for(let i=0;i<3;i++)secrets.push({x:55+rand()*Math.max(1,view.w-110),y:70+rand()*Math.max(1,view.h-140),found:false});
-  S.map={seed:seed||Math.floor(Math.random()*0xffffffff),theme,obstacles,secrets,found:[]};
+  for(let i=0;i<3;i++){const x=65+rand()*Math.max(1,view.w-130),y=80+rand()*Math.max(1,view.h-160),w=58+rand()*42,h=48+rand()*38;secrets.push({x,y,room:{x:x-w/2,y:y-h/2,w,h},path:{x1:35+rand()*Math.max(1,view.w-70),y1:35+rand()*Math.max(1,view.h-70),x2:x,y2:y}})}
+  S.map={seed:seed||Math.floor(Math.random()*0xffffffff),theme,obstacles,secrets,found:[],hiddenPaths:secrets.map(x=>x.path)};
   save();
 }
 function ensureMap(){
@@ -133,7 +133,7 @@ function seededMutation(enemy){
 function recordFrame(){
   if(!Game.p||Game.state!=='play')return;
   const v=core.getView(),p=Game.p;
-  replayFrames.push({t:Math.round((performance.now()-runStartAt)/100),x:p.x/Math.max(1,v.w),y:p.y/Math.max(1,v.h),hp:p.hp,score:Game.score,wave:Game.wave,enemies:(Game.enemies||[]).slice(0,60).map(e=>({x:e.x/Math.max(1,v.w),y:e.y/Math.max(1,v.h),k:e.k,hp:e.hp,mhp:e.mhp,mutation:e.nsMutation||''}))});
+  replayFrames.push({t:Math.round((performance.now()-runStartAt)/100),x:p.x/Math.max(1,v.w),y:p.y/Math.max(1,v.h),hp:p.hp,score:Game.score,wave:Game.wave,kills:killHighlights.slice(-8).map(k=>({x:k.x/Math.max(1,v.w),y:k.y/Math.max(1,v.h),kind:k.kind})),enemies:(Game.enemies||[]).slice(0,60).map(e=>({x:e.x/Math.max(1,v.w),y:e.y/Math.max(1,v.h),k:e.k,hp:e.hp,mhp:e.mhp,mutation:e.nsMutation||''}))});
   if(replayFrames.length>360)replayFrames.shift();
 }
 function saveReplay(){
@@ -152,7 +152,7 @@ function tickDrones(dt){
       if(droneClocks[id]>8&&p.hp<p.maxHp){droneClocks[id]=0;p.hp=Math.min(p.maxHp,p.hp+18);shout('MEDIC DRONE · +18 HULL','#6dffb0')}
     }else{
       droneClocks[id]=(droneClocks[id]||0)+dt;
-      if(droneClocks[id]>1.1){droneClocks[id]=0;let target=null,dist=170*170;
+      if(droneClocks[id]>1.1/(1+S.mods.rate*.07)){droneClocks[id]=0;let target=null,dist=170*170;
         (Game.enemies||[]).forEach(e=>{if(e.dead)return;const d=(e.x-dx)**2+(e.y-dy)**2;if(d<dist){dist=d;target=e}});
         if(target)Game.damage(target,id==='striker'?Math.max(10,26+Game.wave*2):16);
       }
@@ -183,7 +183,7 @@ function replayOverlay(replay){
   content.innerHTML='<div class="ns2-card"><strong>REPLAY THEATER</strong><p>Scrub the captured flight path, change playback speed and choose the camera.</p><canvas id="ns2-replay-canvas" width="960" height="420" style="display:block;width:100%;height:auto;max-height:42vh;background:#040617;border:1px solid #42dff766;border-radius:10px"></canvas><input id="ns2-replay-range" type="range" min="0" max="'+Math.max(0,replay.frames.length-1)+'" value="0"><div class="ns2-row"><button data-action="replay-play">PLAY</button><button data-action="replay-stop">PAUSE</button><select id="ns2-replay-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select><select id="ns2-replay-camera"><option value="follow">Follow pilot</option><option value="overview">Overview</option></select></div><p id="ns2-replay-meta"></p></div>';
   $('ns2-replay-range').oninput=(e)=>{replayIndex=Number(e.target.value);drawReplayPreview();drawOverlay()};
   $('ns2-replay-speed').onchange=(e)=>{replaySpeed=Number(e.target.value)||1};
-  $('ns2-replay-camera').onchange=(e)=>{replayCamera=e.target.value;drawOverlay()};
+  $('ns2-replay-camera').onchange=(e)=>{replayCamera=e.target.value;drawReplayPreview();drawOverlay()};
   $('ns2-replay-meta').textContent='Score '+replay.score+' · Wave '+replay.wave+' · '+replay.frames.length+' frames';
   window._neonRound2Replay=replay;drawReplayPreview();
 }
@@ -201,6 +201,7 @@ function drawReplayPreview(){
   c.save();c.translate(w/2-px*zoom,h/2-py*zoom);c.scale(zoom,zoom);
   c.beginPath();c.arc(px,py,11,0,Math.PI*2);c.fillStyle='#fff';c.shadowBlur=18;c.shadowColor='#45eaff';c.fill();c.shadowBlur=0;
   f.enemies.forEach(e=>{c.beginPath();c.arc(e.x*w,e.y*h,e.k==='boss'?15:6,0,Math.PI*2);c.fillStyle=e.mutation?'#ffae52':'#ff409c';c.fill()});
+  (f.kills||[]).forEach(k=>{c.beginPath();c.arc(k.x*w,k.y*h,16,0,Math.PI*2);c.strokeStyle='#ffd35c';c.lineWidth=2;c.stroke();c.fillStyle='#ffd35c';c.font='bold 10px system-ui';c.fillText(k.kind==='boss'?'BOSS KILL':'KILL',k.x*w+8,k.y*h-8)});
   c.restore();
   c.fillStyle='#fff';c.font='bold 15px system-ui';c.fillText((replayCamera==='follow'?'FOLLOW CAM':'OVERVIEW')+' · WAVE '+f.wave+'  ·  SCORE '+f.score+'  ·  HULL '+Math.round(f.hp),18,26);
 }
@@ -349,8 +350,8 @@ function css(){
   ].join('');
   document.head.append(s);
 }
-function card(title,desc,action,label,disabled){
-  return '<div class="ns2-card"><strong>'+safe(title)+'</strong><small>'+safe(desc)+'</small><button data-action="'+safe(action)+'" data-value="'+safe(label)+'" '+(disabled?'disabled':'')+'>'+safe(label)+'</button></div>';
+function card(title,desc,action,value,disabled,labelText){
+  return '<div class="ns2-card"><strong>'+safe(title)+'</strong><small>'+safe(desc)+'</small><button data-action="'+safe(action)+'" data-value="'+safe(value)+'" '+(disabled?'disabled':'')+'>'+safe(labelText||value)+'</button></div>';
 }
 function createPanel(){
   css();panel=document.createElement('div');panel.id='ns2-panel';
@@ -447,7 +448,7 @@ async function runAction(action,value){
   else if(action==='reveal-map'){if(!S.map.found.length&&S.map.secrets.length){const i=S.map.secrets.findIndex((x,n)=>!S.map.found.includes(n));if(i>=0){S.map.found.push(i);S.materials.crystal+=2;shout('SCANNER FOUND A CACHE','#ffc34d')}}save();render()}
   else if(action==='drone'){const costs={scout:0,medic:18,striker:30,guardian:24},cost=costs[value];if(S.materials.crystal>=cost&&!S.drones.includes(value)){S.materials.crystal-=cost;S.drones.push(value);save();render()}}
   else if(action==='craft'){const costs={damage:[8,2,0],armor:[10,3,0],rate:[12,0,1]},c=costs[value];if(c&&S.materials.scrap>=c[0]&&S.materials.crystal>=c[1]&&S.materials.core>=c[2]){S.materials.scrap-=c[0];S.materials.crystal-=c[1];S.materials.core-=c[2];S.mods[value]++;save();render();shout('CRAFT COMPLETE','#6dffb0')}}
-  else if(action==='pass-claim'){const index=Number(value);if(Number.isInteger(index)&&seasonRewards()[index]&&S.season.xp>=seasonRewards()[index].xp&&!S.season.claimed.includes(index)){const r=seasonRewards()[index];S.season.claimed.push(index);if(r.amount)reward(r.amount);else S.tradeInventory.push({id:'season-'+Date.now(),name:r.label,rarity:'EPIC',kind:'cosmetic'});save();render()}}
+  else if(action==='pass-claim'){const index=Number(value);if(Number.isInteger(index)&&seasonRewards()[index]&&S.season.xp>=seasonRewards()[index].xp&&!S.season.claimed.includes(index)){const r=seasonRewards()[index];S.season.claimed.push(index);if(r.amount)reward(r.amount);else S.tradeInventory.push({id:'season-'+Date.now(),name:r.label,rarity:'EPIC',kind:'skin'});save();render()}}
   else if(action==='replay-open')replayOverlay(S.replays[Number(value)])
   else if(action==='replay-play'){if(replayTimer)clearInterval(replayTimer);replayTimer=setInterval(()=>{const r=window._neonRound2Replay;if(!r){clearInterval(replayTimer);return}replayIndex=(replayIndex+replaySpeed)%r.frames.length;if($('ns2-replay-range'))$('ns2-replay-range').value=String(Math.floor(replayIndex));drawReplayPreview();drawOverlay()},100)}
   else if(action==='replay-stop'){if(replayTimer)clearInterval(replayTimer);replayTimer=null}
@@ -477,7 +478,7 @@ function drawOverlay(){
     const colors={ 'NEON RUINS':'#30dff0','FROST GRID':'#90d8ff','VOID GARDEN':'#b27cff','SOLAR FOUNDRY':'#ff9a43','ABYSSAL LAB':'#55a8d8'};
     c.fillStyle=colors[S.map.theme]||'#36e0ed';c.globalAlpha=.035;c.fillRect(0,0,w,h);c.globalAlpha=1;
     (S.map.obstacles||[]).forEach(o=>{c.fillStyle=o.kind==='crystal'?'#44eaff18':'#a76bff20';c.strokeStyle=o.kind==='crystal'?'#57e8ff88':'#b47cff77';c.lineWidth=1.4;c.fillRect(o.x*sx,o.y*sy,o.w*sx,o.h*sy);c.strokeRect(o.x*sx,o.y*sy,o.w*sx,o.h*sy)});
-    (S.map.secrets||[]).forEach((q,i)=>{if(S.map.found.includes(i))return;c.beginPath();c.arc(q.x*sx,q.y*sy,8,0,Math.PI*2);c.strokeStyle='#ffc34d99';c.lineWidth=2;c.stroke()});
+    (S.map.secrets||[]).forEach((q,i)=>{const found=S.map.found.includes(i);if(!found){c.beginPath();c.arc(q.x*sx,q.y*sy,8,0,Math.PI*2);c.strokeStyle='#ffc34d99';c.lineWidth=2;c.stroke();return}if(q.room){c.fillStyle='#ffc34d12';c.strokeStyle='#ffc34d';c.setLineDash([5,4]);c.lineWidth=2;c.fillRect(q.room.x*sx,q.room.y*sy,q.room.w*sx,q.room.h*sy);c.strokeRect(q.room.x*sx,q.room.y*sy,q.room.w*sx,q.room.h*sy);c.setLineDash([])}if(q.path){c.beginPath();c.moveTo(q.path.x1*sx,q.path.y1*sy);c.lineTo(q.path.x2*sx,q.path.y2*sy);c.strokeStyle='#ffc34d';c.lineWidth=3;c.stroke()}});
     (Game.enemies||[]).forEach(e=>{if(!e.nsMutation||e.dead)return;c.beginPath();c.arc(e.x*sx,e.y*sy,e.r+7,0,Math.PI*2);c.strokeStyle='#ffad55';c.lineWidth=2;c.setLineDash([4,3]);c.stroke();c.setLineDash([]);c.fillStyle='#ffda9a';c.font='bold 9px system-ui';c.fillText(e.nsMutation,e.x*sx+e.r+5,e.y*sy-9)});
     if(Game.p&&S.drones.length)S.drones.forEach((id,i)=>{const a=Game.time*1.45+i*Math.PI*2/S.drones.length,x=(Game.p.x+Math.cos(a)*(34+i*11))*sx,y=(Game.p.y+Math.sin(a)*(34+i*11))*sy;c.beginPath();c.arc(x,y,6,0,Math.PI*2);c.fillStyle=id==='medic'?'#6dffb0':'#46e9ff';c.shadowBlur=12;c.shadowColor=c.fillStyle;c.fill();c.shadowBlur=0});
     remotePlayers.forEach(p=>{const x=Math.max(0,Math.min(1,p.x))*w,y=Math.max(0,Math.min(1,p.y))*h;c.beginPath();c.arc(x,y,8,0,Math.PI*2);c.fillStyle='#ff56b7';c.shadowBlur=15;c.shadowColor='#ff56b7';c.fill();c.shadowBlur=0;c.fillStyle='#fff';c.font='11px system-ui';c.fillText(p.name||'Pilot',x+10,y-8)});
@@ -502,7 +503,7 @@ function installOverlay(){
 function hooks(){
   const oldStart=Game.start;
   Game.start=function(){
-    runStartAt=performance.now();replayFrames=[];replayAccumulator=0;ensureMap();
+    runStartAt=performance.now();replayFrames=[];killHighlights=[];replayAccumulator=0;ensureMap();
     const result=oldStart.apply(this,arguments);
     if(pendingRun&&pendingRun.kind==='custom'){
       this.wave=pendingRun.challenge.wave;this.enemies=[];this.spawnWave();
@@ -524,7 +525,7 @@ function hooks(){
     const adjusted=amount*multiplier*(enemy.nsArmor?1-enemy.nsArmor:1);
     const result=oldDamage.call(this,enemy,adjusted);
     if(enemy.dead&&!enemy.nsRound2Paid){
-      enemy.nsRound2Paid=true;S.materials.scrap+=enemy.k==='boss'?12:1+(Math.random()<.35?1:0);
+      enemy.nsRound2Paid=true;killHighlights.push({x:enemy.x,y:enemy.y,kind:enemy.k,t:performance.now()});if(killHighlights.length>40)killHighlights.shift();S.materials.scrap+=enemy.k==='boss'?12:1+(Math.random()<.35?1:0);
       if(enemy.k==='boss'){S.materials.crystal+=4;S.materials.core+=2;S.tradeInventory.push({id:'boss-'+Date.now(),name:'Swarm Core Shard',rarity:'LEGENDARY',kind:'equipment'})}
       else if(Math.random()<.025)S.tradeInventory.push({id:'drop-'+Date.now(),name:'Mutation Residue',rarity:'RARE',kind:'collectible'});
       S.season.xp+=enemy.k==='boss'?40:5;S.event.kills++;
@@ -555,10 +556,15 @@ function hooks(){
   if(typeof Game.hurt==='function'){
     const oldHurt=Game.hurt;
     Game.hurt=function(amount){
-      if(amount===undefined)return oldHurt.call(this,amount);
-      return oldHurt.call(this,Math.max(1,amount*(1-S.mods.armor*.08)));
+      const incoming=amount===undefined?5:amount;
+      return oldHurt.call(this,Math.max(1,incoming*(1-S.mods.armor*.08)));
     };
   }
+  const oldControl=Game.control;
+  Game.control=function(dt){
+    if(this.p&&S.mods.rate>0)this.p.fireT-=dt*S.mods.rate*.07;
+    return oldControl.call(this,dt);
+  };
   const oldClear=Game.clearWave;
   Game.clearWave=function(){
     const mission=activeMission(),wave=this.wave;
