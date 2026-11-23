@@ -581,7 +581,9 @@ function hooks(){
     const oldHurt=Game.hurt;
     Game.hurt=function(amount){
       const incoming=amount===undefined?5:amount;
-      return oldHurt.call(this,Math.max(1,incoming*(1-S.mods.armor*.08)));
+      const guardianBonus=S.drones.includes('guardian')?.12:0;
+      const reduction=Math.min(.6,S.mods.armor*.08+guardianBonus);
+      return oldHurt.call(this,Math.max(1,incoming*(1-reduction)));
     };
   }
   const oldControl=Game.control;
