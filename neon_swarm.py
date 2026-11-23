@@ -1392,7 +1392,7 @@ class Handler(BaseHTTPRequestHandler):
           feature_tag = '<script src="/neon_swarm_features.js"></script>'
           if feature_tag not in GAME_HTML:
             return self.send_body(500, '{"error":"game feature hook is missing"}')
-          inline_scripts = "\\n".join("<script>\\n" + script + "\\n</script>" for script in scripts)
+          inline_scripts = "\n".join("<script>\n" + script + "\n</script>" for script in scripts)
           html = GAME_HTML.replace(feature_tag, inline_scripts)
           return self.send_body(200, html, "text/html")
         if path in ("/neon_swarm_features.js", "/neon_swarm_expansion.js", "/neon_swarm_apex.js", "/neon_swarm_ultimate.js", "/neon_swarm_round2.js"):
