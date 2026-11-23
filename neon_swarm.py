@@ -22,6 +22,13 @@ import threading
 import time
 import traceback
 import webbrowser
+
+# PyInstaller --windowed can start with stdout/stderr unset on Windows.
+if getattr(sys, "frozen", False):
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = sys.stdout
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
