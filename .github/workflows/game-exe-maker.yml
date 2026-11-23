@@ -78,9 +78,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "WiX install failed." }
           $env:PATH = "$env:PATH;$([Environment]::GetFolderPath('UserProfile'))\.dotnet\tools"
           "PATH=$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append
-          wix extension add -g WixToolset.UI.wixext
+          wix extension add -g WixToolset.UI.wixext/6.0.0
           if ($LASTEXITCODE -ne 0) { throw "WiX UI extension install failed." }
-          wix extension add -g WixToolset.BootstrapperApplications.wixext
+          wix extension add -g WixToolset.BootstrapperApplications.wixext/6.0.0
           if ($LASTEXITCODE -ne 0) { throw "WiX bootstrapper extension install failed." }
 
       - name: Download WebView2 Evergreen bootstrapper
