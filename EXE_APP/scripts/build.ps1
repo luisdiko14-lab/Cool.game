@@ -70,7 +70,9 @@ try {
     Invoke-WebRequest -UseBasicParsing -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $runtime
     $msi = Join-Path $dist "Neon_Swarm_Setup.msi"
     $setup = Join-Path $dist "Neon_Swarm_Setup.exe"
-    & wix build -arch x64 -ext WixToolset.UI.wixext -d "PublishDir=$publish" "Installer/Msi/Package.wxs" -out $msi
+    $buildNumber = if ($env:GITHUB_RUN_NUMBER) { [int]$env:GITHUB_RUN_NUMBER } else { 1 }
+    $productVersion = "1.0.$buildNumber"
+    & wix build -arch x64 -ext WixToolset.UI.wixext -d "PublishDir=$publish" -d "ProductVersion=$productVersion" "Installer/Msi/Package.wxs" -out $msi
     if ($LASTEXITCODE -ne 0) { throw "WiX could not create the MSI." }
     & wix build -arch x64 -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext -d "MsiPath=$msi" -d "WebView2Installer=$runtime" "Installer/Bundle/Bundle.wxs" -out $setup
     if ($LASTEXITCODE -ne 0) { throw "WiX could not create Setup.exe." }

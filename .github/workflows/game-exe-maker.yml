@@ -109,7 +109,7 @@ jobs:
         working-directory: EXE_APP
         run: |
           $publish = (Resolve-Path dist/Neon_Swarm).Path
-          wix build -arch x64 -ext WixToolset.UI.wixext -d "PublishDir=$publish" Installer/Msi/Package.wxs -out dist/Neon_Swarm_Setup.msi
+          wix build -arch x64 -ext WixToolset.UI.wixext -d "PublishDir=$publish" -d "ProductVersion=1.0.${{ github.run_number }}" Installer/Msi/Package.wxs -out dist/Neon_Swarm_Setup.msi
           if ($LASTEXITCODE -ne 0) { throw "MSI build failed." }
 
       - name: Build Setup.exe wizard

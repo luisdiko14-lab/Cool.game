@@ -3,7 +3,7 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="Neon Swarm"
            Manufacturer="Luis Apps Inc."
-           Version="1.0.0"
+           Version="$(var.ProductVersion)"
            UpgradeCode="A7A7F93D-24A5-4E3E-95EA-7D11EBDB5460"
            Scope="perMachine"
            InstallerVersion="500">
