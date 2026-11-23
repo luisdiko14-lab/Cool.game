@@ -88,11 +88,15 @@ jobs:
         run: |
           $assets = @("neon_swarm_features.js","neon_swarm_expansion.js","neon_swarm_apex.js","neon_swarm_ultimate.js","neon_swarm_round2.js","Raya(Slowed).mp3")
           $pyInstallerArgs = @("-m","PyInstaller","--noconfirm","--clean","--onefile","--windowed","--name","neon_web_python","--distpath","EXE_APP/dist/Neon_Swarm","--workpath","EXE_APP/dist/python-work","--specpath","EXE_APP/dist/python-spec","--collect-all","cryptography","--hidden-import","auth")
+          $publicPath = (Resolve-Path "public").Path
+          $pyInstallerArgs += @("--add-data","$publicPath;public")
           foreach ($asset in $assets) {
             if (-not (Test-Path $asset)) { throw "Missing Python host asset: $asset" }
-            $pyInstallerArgs += @("--add-data","$asset;.")
+            $assetPath = (Resolve-Path $asset).Path
+            $pyInstallerArgs += @("--add-data","$assetPath;.")
           }
-          $pyInstallerArgs += "neon_swarm.py"
+          $entryPoint = (Resolve-Path "neon_swarm.py").Path
+          $pyInstallerArgs += $entryPoint
           python @pyInstallerArgs
           if ($LASTEXITCODE -ne 0) { throw "neon_web_python.exe packaging failed." }
           if (-not (Test-Path "EXE_APP/dist/Neon_Swarm/neon_web_python.exe")) { throw "neon_web_python.exe was not produced." }
