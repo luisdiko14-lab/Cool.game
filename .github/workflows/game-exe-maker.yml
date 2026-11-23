@@ -6,6 +6,8 @@ on:
     paths-ignore:
       - "EXE_APP/dist/**"
       - "Build_and_use_game.exe"
+  pull_request:
+    branches: ["main", "feature/neon-swarm-expansion-2026"]
   workflow_dispatch:
 
 concurrency:
