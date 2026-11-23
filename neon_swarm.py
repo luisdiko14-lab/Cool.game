@@ -905,6 +905,8 @@ MARKET_USERS = {}
 MARKET_LISTINGS = {}
 EVENT_LOCK = threading.Lock()
 EVENT_PROGRESS = {}
+CHALLENGE_LOCK = threading.Lock()
+CHALLENGES = []
 
 
 def clean_public_name(value, maximum=16):
@@ -1343,6 +1345,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, {"rooms": rows})
         if path == "/api/events":
             return self.send_json(200, {"event": current_live_event()})
+        if path == "/api/challenges":
+            with CHALLENGE_LOCK:
+                rows = [dict(challenge) for challenge in CHALLENGES[-50:]]
+            return self.send_json(200, {"challenges": rows})
         if path == "/api/market/listings":
             token = self.headers.get("X-Market-Token", "")
             with MARKET_LOCK:
@@ -1431,6 +1437,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self.event_request()
             except (ValueError, TypeError, OverflowError):
                 return self.send_json(400, {"error": "Invalid event contribution"})
+        if path == "/api/challenges":
+            try:
+                data = self.read_json(8192)
+                name = clean_public_name(data.get("name", "Community challenge"), 32)
+                wave = max(1, min(60, int(data.get("wave", 10))))
+                density = max(1.0, min(2.0, float(data.get("density", 1))))
+                seed = max(1, min(2147483647, int(data.get("seed", 1))))
+                challenge = {"id": secrets.token_hex(6), "shareCode": secrets.token_hex(4).upper(),
+                             "name": name, "wave": wave, "density": density, "seed": seed,
+                             "author": clean_public_name(data.get("author", "Pilot")),
+                             "createdAt": int(time.time())}
+                with CHALLENGE_LOCK:
+                    CHALLENGES.append(challenge)
+                    del CHALLENGES[:-100]
+                return self.send_json(201, {"challenge": challenge})
+            except (ValueError, TypeError, OverflowError):
+                return self.send_json(400, {"error": "Invalid custom challenge"})
         if path == "/auth/logout":
             return self._logout()
         if path in ("/auth/register", "/auth/login", "/auth/authorize"):
