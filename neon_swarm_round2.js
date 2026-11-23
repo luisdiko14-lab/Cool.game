@@ -183,7 +183,7 @@ function replayOverlay(replay){
   content.innerHTML='<div class="ns2-card"><strong>REPLAY THEATER</strong><p>Scrub the captured flight path, change playback speed and choose the camera.</p><canvas id="ns2-replay-canvas" width="960" height="420" style="display:block;width:100%;height:auto;max-height:42vh;background:#040617;border:1px solid #42dff766;border-radius:10px"></canvas><input id="ns2-replay-range" type="range" min="0" max="'+Math.max(0,replay.frames.length-1)+'" value="0"><div class="ns2-row"><button data-action="replay-play">PLAY</button><button data-action="replay-stop">PAUSE</button><select id="ns2-replay-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select><select id="ns2-replay-camera"><option value="follow">Follow pilot</option><option value="overview">Overview</option></select></div><p id="ns2-replay-meta"></p></div>';
   $('ns2-replay-range').oninput=(e)=>{replayIndex=Number(e.target.value);drawReplayPreview();drawOverlay()};
   $('ns2-replay-speed').onchange=(e)=>{replaySpeed=Number(e.target.value)||1};
-  $('ns2-replay-camera').onchange=(e)=>{replayCamera=e.target.value;drawOverlay()};
+  $('ns2-replay-camera').onchange=(e)=>{replayCamera=e.target.value;drawReplayPreview();drawOverlay()};
   $('ns2-replay-meta').textContent='Score '+replay.score+' · Wave '+replay.wave+' · '+replay.frames.length+' frames';
   window._neonRound2Replay=replay;drawReplayPreview();
 }
@@ -349,8 +349,8 @@ function css(){
   ].join('');
   document.head.append(s);
 }
-function card(title,desc,action,label,disabled){
-  return '<div class="ns2-card"><strong>'+safe(title)+'</strong><small>'+safe(desc)+'</small><button data-action="'+safe(action)+'" data-value="'+safe(label)+'" '+(disabled?'disabled':'')+'>'+safe(label)+'</button></div>';
+function card(title,desc,action,value,disabled,labelText){
+  return '<div class="ns2-card"><strong>'+safe(title)+'</strong><small>'+safe(desc)+'</small><button data-action="'+safe(action)+'" data-value="'+safe(value)+'" '+(disabled?'disabled':'')+'>'+safe(labelText||value)+'</button></div>';
 }
 function createPanel(){
   css();panel=document.createElement('div');panel.id='ns2-panel';
@@ -447,7 +447,7 @@ async function runAction(action,value){
   else if(action==='reveal-map'){if(!S.map.found.length&&S.map.secrets.length){const i=S.map.secrets.findIndex((x,n)=>!S.map.found.includes(n));if(i>=0){S.map.found.push(i);S.materials.crystal+=2;shout('SCANNER FOUND A CACHE','#ffc34d')}}save();render()}
   else if(action==='drone'){const costs={scout:0,medic:18,striker:30,guardian:24},cost=costs[value];if(S.materials.crystal>=cost&&!S.drones.includes(value)){S.materials.crystal-=cost;S.drones.push(value);save();render()}}
   else if(action==='craft'){const costs={damage:[8,2,0],armor:[10,3,0],rate:[12,0,1]},c=costs[value];if(c&&S.materials.scrap>=c[0]&&S.materials.crystal>=c[1]&&S.materials.core>=c[2]){S.materials.scrap-=c[0];S.materials.crystal-=c[1];S.materials.core-=c[2];S.mods[value]++;save();render();shout('CRAFT COMPLETE','#6dffb0')}}
-  else if(action==='pass-claim'){const index=Number(value);if(Number.isInteger(index)&&seasonRewards()[index]&&S.season.xp>=seasonRewards()[index].xp&&!S.season.claimed.includes(index)){const r=seasonRewards()[index];S.season.claimed.push(index);if(r.amount)reward(r.amount);else S.tradeInventory.push({id:'season-'+Date.now(),name:r.label,rarity:'EPIC',kind:'cosmetic'});save();render()}}
+  else if(action==='pass-claim'){const index=Number(value);if(Number.isInteger(index)&&seasonRewards()[index]&&S.season.xp>=seasonRewards()[index].xp&&!S.season.claimed.includes(index)){const r=seasonRewards()[index];S.season.claimed.push(index);if(r.amount)reward(r.amount);else S.tradeInventory.push({id:'season-'+Date.now(),name:r.label,rarity:'EPIC',kind:'skin'});save();render()}}
   else if(action==='replay-open')replayOverlay(S.replays[Number(value)])
   else if(action==='replay-play'){if(replayTimer)clearInterval(replayTimer);replayTimer=setInterval(()=>{const r=window._neonRound2Replay;if(!r){clearInterval(replayTimer);return}replayIndex=(replayIndex+replaySpeed)%r.frames.length;if($('ns2-replay-range'))$('ns2-replay-range').value=String(Math.floor(replayIndex));drawReplayPreview();drawOverlay()},100)}
   else if(action==='replay-stop'){if(replayTimer)clearInterval(replayTimer);replayTimer=null}
