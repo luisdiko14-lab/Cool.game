@@ -44,7 +44,7 @@ const missions = [
   {id:'core',title:'05 · HEART OF THE SWARM',subtitle:'Defeat the final storyline boss.',wave:60,lines:['This is it. The signal is the hive mind.','Destroy the Heart of the Swarm and end the invasion.'],done:'The Heart has gone dark. The Neon Swarm is over.'}
 ];
 let activeTab='story',panel=null,dialog=null,dialogDone=null,serverRows=[],marketRows=[],eventInfo=null;
-let pendingRun=null,runStartAt=0,remoteChallenges=[],replayFrames=[],replayAccumulator=0,replayTimer=null,replayIndex=0,replaySpeed=1,replayCamera='follow';
+let pendingRun=null,runStartAt=0,remoteChallenges=[],replayFrames=[],replayAccumulator=0,replayTimer=null,replayIndex=0,replaySpeed=1,replayCamera='follow',dialogTypeTimer=null;
 let droneClocks={},mutationClock=0,lastEventSend=0,room=null,roomTimer=null,remotePlayers=[],marketToken=localStorage.getItem('neonswarm.market-token')||'';
 let round2Overlay=null,overlayCtx=null,overlayScale=1,overlayWidth=0,overlayHeight=0,overlayRaf=0;
 const themes=['NEON RUINS','FROST GRID','VOID GARDEN','SOLAR FOUNDRY','ABYSSAL LAB'];
@@ -93,14 +93,17 @@ function openDialog(title,lines,onDone){
 }
 function renderDialogLine(){
   if(!dialog)return;
-  const i=dialog._index,n=dialog._lines.length;
-  dialog.querySelector('.ns2-dialog-text').textContent=dialog._lines[i]||'';
+  if(dialogTypeTimer){clearInterval(dialogTypeTimer);dialogTypeTimer=null}
+  const i=dialog._index,n=dialog._lines.length,text=dialog._lines[i]||'',target=dialog.querySelector('.ns2-dialog-text');
+  target.textContent='';let at=0;
+  dialogTypeTimer=setInterval(()=>{at=Math.min(text.length,at+2);target.textContent=text.slice(0,at);if(at>=text.length){clearInterval(dialogTypeTimer);dialogTypeTimer=null}},18);
   dialog.querySelector('.ns2-dialog-step').textContent=(i+1)+' / '+n;
   dialog.querySelector('#ns2-dialog-next').textContent=i+1>=n?'CONTINUE TO MISSION':'NEXT';
 }
 function nextDialog(){
   if(!dialog)return;
   if(dialog._index+1<dialog._lines.length){dialog._index++;renderDialogLine();return}
+  if(dialogTypeTimer){clearInterval(dialogTypeTimer);dialogTypeTimer=null}
   dialog.classList.remove('open');const cb=dialogDone;dialogDone=null;if(cb)cb();else if(Game.state==='pause')Game.resume();
 }
 function completeMission(mission){
@@ -194,9 +197,12 @@ function drawReplayPreview(){
   c.beginPath();for(let i=start;i<end;i++){const f=replay.frames[i],x=f.x*w,y=f.y*h;if(i===start)c.moveTo(x,y);else c.lineTo(x,y)}
   c.strokeStyle='#48eaff';c.lineWidth=3;c.stroke();
   const f=replay.frames[Math.max(0,Math.min(replay.frames.length-1,Math.floor(replayIndex)))];if(!f)return;
-  c.beginPath();c.arc(f.x*w,f.y*h,11,0,Math.PI*2);c.fillStyle='#fff';c.shadowBlur=18;c.shadowColor='#45eaff';c.fill();c.shadowBlur=0;
+  const zoom=replayCamera==='follow'?1.45:1,px=f.x*w,py=f.y*h;
+  c.save();c.translate(w/2-px*zoom,h/2-py*zoom);c.scale(zoom,zoom);
+  c.beginPath();c.arc(px,py,11,0,Math.PI*2);c.fillStyle='#fff';c.shadowBlur=18;c.shadowColor='#45eaff';c.fill();c.shadowBlur=0;
   f.enemies.forEach(e=>{c.beginPath();c.arc(e.x*w,e.y*h,e.k==='boss'?15:6,0,Math.PI*2);c.fillStyle=e.mutation?'#ffae52':'#ff409c';c.fill()});
-  c.fillStyle='#fff';c.font='bold 15px system-ui';c.fillText('WAVE '+f.wave+'  ·  SCORE '+f.score+'  ·  HULL '+Math.round(f.hp),18,26);
+  c.restore();
+  c.fillStyle='#fff';c.font='bold 15px system-ui';c.fillText((replayCamera==='follow'?'FOLLOW CAM':'OVERVIEW')+' · WAVE '+f.wave+'  ·  SCORE '+f.score+'  ·  HULL '+Math.round(f.hp),18,26);
 }
 function marketHeaders(){return marketToken?{'Content-Type':'application/json','X-Market-Token':marketToken}:{'Content-Type':'application/json'}}
 async function ensureMarketSession(){
@@ -472,6 +478,7 @@ function drawOverlay(){
     c.fillStyle=colors[S.map.theme]||'#36e0ed';c.globalAlpha=.035;c.fillRect(0,0,w,h);c.globalAlpha=1;
     (S.map.obstacles||[]).forEach(o=>{c.fillStyle=o.kind==='crystal'?'#44eaff18':'#a76bff20';c.strokeStyle=o.kind==='crystal'?'#57e8ff88':'#b47cff77';c.lineWidth=1.4;c.fillRect(o.x*sx,o.y*sy,o.w*sx,o.h*sy);c.strokeRect(o.x*sx,o.y*sy,o.w*sx,o.h*sy)});
     (S.map.secrets||[]).forEach((q,i)=>{if(S.map.found.includes(i))return;c.beginPath();c.arc(q.x*sx,q.y*sy,8,0,Math.PI*2);c.strokeStyle='#ffc34d99';c.lineWidth=2;c.stroke()});
+    (Game.enemies||[]).forEach(e=>{if(!e.nsMutation||e.dead)return;c.beginPath();c.arc(e.x*sx,e.y*sy,e.r+7,0,Math.PI*2);c.strokeStyle='#ffad55';c.lineWidth=2;c.setLineDash([4,3]);c.stroke();c.setLineDash([]);c.fillStyle='#ffda9a';c.font='bold 9px system-ui';c.fillText(e.nsMutation,e.x*sx+e.r+5,e.y*sy-9)});
     if(Game.p&&S.drones.length)S.drones.forEach((id,i)=>{const a=Game.time*1.45+i*Math.PI*2/S.drones.length,x=(Game.p.x+Math.cos(a)*(34+i*11))*sx,y=(Game.p.y+Math.sin(a)*(34+i*11))*sy;c.beginPath();c.arc(x,y,6,0,Math.PI*2);c.fillStyle=id==='medic'?'#6dffb0':'#46e9ff';c.shadowBlur=12;c.shadowColor=c.fillStyle;c.fill();c.shadowBlur=0});
     remotePlayers.forEach(p=>{const x=Math.max(0,Math.min(1,p.x))*w,y=Math.max(0,Math.min(1,p.y))*h;c.beginPath();c.arc(x,y,8,0,Math.PI*2);c.fillStyle='#ff56b7';c.shadowBlur=15;c.shadowColor='#ff56b7';c.fill();c.shadowBlur=0;c.fillStyle='#fff';c.font='11px system-ui';c.fillText(p.name||'Pilot',x+10,y-8)});
   }
