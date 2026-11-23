@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.IO.Pipes;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -19,6 +20,30 @@ internal static class Program
         if (args.Contains("--server-smoke-test", StringComparer.OrdinalIgnoreCase))
             return SmokeTestAsync().GetAwaiter().GetResult();
 
+        if (!LaunchOptions.HasPickedResolution(args))
+        {
+            string picker = Path.Combine(AppContext.BaseDirectory, "Neon_Swarm_Pick.exe");
+            if (!File.Exists(picker))
+            {
+                MessageBox.Show("Neon_Swarm_Pick.exe is missing. Repair or reinstall Neon Swarm.",
+                    "Neon Swarm Launcher", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return 2;
+            }
+            try
+            {
+                Process.Start(new ProcessStartInfo(picker) { UseShellExecute = true, WorkingDirectory = AppContext.BaseDirectory });
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Could not open the resolution picker", ex);
+                MessageBox.Show("Could not open Neon Swarm Pick.\n\n" + ex.Message,
+                    "Neon Swarm Launcher", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return 2;
+            }
+        }
+
+        LaunchOptions options = LaunchOptions.FromArgs(args);
         ApplicationConfiguration.Initialize();
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_, e) =>
@@ -45,7 +70,7 @@ internal static class Program
 
         try
         {
-            Application.Run(new MainForm());
+            Application.Run(new MainForm(options));
             return Environment.ExitCode;
         }
         catch (Exception ex)
@@ -67,6 +92,8 @@ internal static class Program
             string html = await client.GetStringAsync("");
             Check(html.Contains("menu-shell"), "Updated menu HTML is missing.");
             Check(html.Contains("export-progress"), "Save-transfer controls are missing.");
+            Check(html.Contains("NeonSwarmDesktopAdmin"), "Desktop admin bridge is missing.");
+            Check(html.Contains("DesktopRenderOptions"), "Render profile logic is missing.");
             foreach (string module in new[] { "neon_swarm_features.js", "neon_swarm_expansion.js", "neon_swarm_apex.js" })
                 Check((await client.GetStringAsync(module)).Length > 100, $"Game module is missing: {module}");
             Check((await client.GetAsync("api/auth")).IsSuccessStatusCode, "Offline auth status failed.");
@@ -127,13 +154,16 @@ internal sealed class MainForm : Form
     private readonly GameServer _server = new();
     private readonly WebView2 _browser = new();
     private readonly ToolStripStatusLabel _status = new();
+    private readonly LaunchOptions _launchOptions;
+    private readonly CancellationTokenSource _adminPipeStop = new();
     private bool _handlerStarted;
     private bool _fullscreen;
     private FormBorderStyle _savedBorder;
     private FormWindowState _savedState;
 
-    public MainForm()
+    public MainForm(LaunchOptions launchOptions)
     {
+        _launchOptions = launchOptions;
         Text = "Neon Swarm";
         StartPosition = FormStartPosition.CenterScreen;
         Size = new Size(1280, 820);
@@ -230,7 +260,13 @@ internal sealed class MainForm : Form
                 }
             };
             StartCrashHandler();
-            core.Navigate(_server.BaseUrl);
+            StartCompanions();
+            _ = AdminPipeLoopAsync(_adminPipeStop.Token);
+            string query = "?resolution=" + Uri.EscapeDataString(_launchOptions.Resolution) +
+                "&targetHeight=" + _launchOptions.TargetHeight +
+                "&vfx=" + (_launchOptions.Vfx ? "on" : "off") +
+                "&animations=" + (_launchOptions.Animations ? "on" : "off");
+            core.Navigate(_server.BaseUrl + query);
             _status.Text = "OFFLINE READY  •  LOCAL SAVES AND LEADERBOARD ENABLED";
         }
         catch (Exception ex)
@@ -265,10 +301,76 @@ internal sealed class MainForm : Form
             start.ArgumentList.Add("--pid"); start.ArgumentList.Add(Environment.ProcessId.ToString());
             start.ArgumentList.Add("--app"); start.ArgumentList.Add(Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "Neon_Swarm.exe"));
             start.ArgumentList.Add("--workdir"); start.ArgumentList.Add(AppContext.BaseDirectory);
+            foreach (string item in _launchOptions.ToArguments()) start.ArgumentList.Add(item);
             Process.Start(start);
             _handlerStarted = true;
         }
         catch (Exception ex) { CrashLog.Write("Could not start crash helper", ex); }
+    }
+
+    private void StartCompanions()
+    {
+        StartCompanion("Neon_Swarm_Update_Checker_Background.exe", "--owner-pid", Environment.ProcessId.ToString());
+        StartCompanion("Neon_Swarm_Webview2_Background.exe", "--owner-pid", Environment.ProcessId.ToString());
+        StartCompanion("Admin_Panel.exe", "--background");
+    }
+
+    private void StartCompanion(string fileName, params string[] args)
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, fileName);
+        if (!File.Exists(path)) { CrashLog.Write("Background companion is missing: " + fileName); return; }
+        try
+        {
+            var start = new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = AppContext.BaseDirectory };
+            foreach (string arg in args) start.ArgumentList.Add(arg);
+            Process.Start(start);
+        }
+        catch (Exception ex) { CrashLog.Write("Could not start companion " + fileName, ex); }
+    }
+
+    private async Task AdminPipeLoopAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await using var pipe = new NamedPipeServerStream("NeonSwarmGameAdmin", PipeDirection.InOut, 1,
+                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                await pipe.WaitForConnectionAsync(token);
+                using var reader = new StreamReader(pipe, Encoding.UTF8, false, 1024, leaveOpen: true);
+                await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true) { AutoFlush = true };
+                string? line = await reader.ReadLineAsync(token);
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                string reply = await RunAdminRequestAsync(line, token);
+                await writer.WriteLineAsync(reply);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
+            catch (Exception ex)
+            {
+                CrashLog.Write("Admin IPC request failed", ex);
+                try { await Task.Delay(250, token); } catch { break; }
+            }
+        }
+    }
+
+    private async Task<string> RunAdminRequestAsync(string requestJson, CancellationToken token)
+    {
+        try
+        {
+            using JsonDocument request = JsonDocument.Parse(requestJson);
+            string script = "window.NeonSwarmDesktopAdmin ? window.NeonSwarmDesktopAdmin.handle(" +
+                request.RootElement.GetRawText() + ") : {ok:false,message:'The game page is not ready.'};";
+            if (IsDisposed || !IsHandleCreated || _browser.CoreWebView2 is null)
+                return "{\"ok\":false,\"message\":\"Neon Swarm is not ready.\"}";
+            var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            BeginInvoke(async () =>
+            {
+                try { completion.TrySetResult(await _browser.CoreWebView2.ExecuteScriptAsync(script)); }
+                catch (Exception ex) { completion.TrySetResult(JsonSerializer.Serialize(new { ok = false, message = ex.Message })); }
+            });
+            return await completion.Task.WaitAsync(TimeSpan.FromSeconds(8), token);
+        }
+        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, message = ex.Message }); }
     }
 
     private void OpenSaves()
@@ -301,7 +403,12 @@ internal sealed class MainForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
-        try { _browser.Dispose(); _server.Dispose(); }
+        try
+        {
+            _adminPipeStop.Cancel();
+            _browser.Dispose();
+            _server.Dispose();
+        }
         catch (Exception ex) { CrashLog.Write("Shutdown cleanup error", ex); }
         base.OnFormClosed(e);
     }
@@ -560,5 +667,33 @@ internal sealed class GameServer : IDisposable
     {
         public string n { get; set; } = "Player";
         public long s { get; set; }
+    }
+}
+
+internal sealed record LaunchOptions(string Resolution, int TargetHeight, bool Vfx, bool Animations)
+{
+    public static bool HasPickedResolution(string[] args) =>
+        args.Any(x => string.Equals(x, "--picked-resolution", StringComparison.OrdinalIgnoreCase));
+
+    public static LaunchOptions FromArgs(string[] args)
+    {
+        string Read(string key, string fallback)
+        {
+            int index = Array.FindIndex(args, x => string.Equals(x, key, StringComparison.OrdinalIgnoreCase));
+            return index >= 0 && index + 1 < args.Length ? args[index + 1] : fallback;
+        }
+        string resolution = Read("--picked-resolution", "720p").ToLowerInvariant();
+        int height = int.TryParse(Read("--target-height", "720"), out int parsed) ? Math.Clamp(parsed, 144, 2160) : 720;
+        bool vfx = !string.Equals(Read("--vfx", "on"), "off", StringComparison.OrdinalIgnoreCase);
+        bool animations = !string.Equals(Read("--animations", "on"), "off", StringComparison.OrdinalIgnoreCase);
+        return new LaunchOptions(resolution, height, vfx, animations);
+    }
+
+    public IEnumerable<string> ToArguments()
+    {
+        yield return "--picked-resolution"; yield return Resolution;
+        yield return "--target-height"; yield return TargetHeight.ToString();
+        yield return "--vfx"; yield return Vfx ? "on" : "off";
+        yield return "--animations"; yield return Animations ? "on" : "off";
     }
 }

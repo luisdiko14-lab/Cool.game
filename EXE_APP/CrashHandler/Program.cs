@@ -16,8 +16,9 @@ internal static class Program
         app = Path.GetFullPath(app);
         workdir = Path.GetFullPath(workdir);
         if (!File.Exists(app)) return 3;
+        string[] launchArgs = args.SkipWhile(x => !string.Equals(x, "--picked-resolution", StringComparison.OrdinalIgnoreCase)).ToArray();
         ApplicationConfiguration.Initialize();
-        Application.Run(new RecoveryForm(pid, app, workdir));
+        Application.Run(new RecoveryForm(pid, app, workdir, launchArgs));
         return 0;
     }
 
@@ -35,15 +36,17 @@ internal sealed class RecoveryForm : Form
 {
     private readonly string _app;
     private readonly string _workdir;
+    private readonly string[] _launchArgs;
     private readonly NotifyIcon _tray;
     private int _pid;
     private bool _closing;
 
-    public RecoveryForm(int pid, string app, string workdir)
+    public RecoveryForm(int pid, string app, string workdir, string[] launchArgs)
     {
         _pid = pid;
         _app = app;
         _workdir = workdir;
+        _launchArgs = launchArgs;
         ShowInTaskbar = false;
         WindowState = FormWindowState.Minimized;
         FormBorderStyle = FormBorderStyle.FixedToolWindow;
@@ -101,6 +104,7 @@ internal sealed class RecoveryForm : Form
                     WorkingDirectory = _workdir,
                     UseShellExecute = true
                 };
+                foreach (string arg in _launchArgs) start.ArgumentList.Add(arg);
                 using Process? launched = Process.Start(start);
                 if (launched is null) throw new InvalidOperationException("Windows did not start Neon Swarm.");
                 _pid = launched.Id;

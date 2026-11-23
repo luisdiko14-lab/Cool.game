@@ -15,7 +15,9 @@
     <Company>Luis Apps Inc.</Company>
     <Product>Neon Swarm</Product>
     <Description>Neon Swarm Windows desktop game</Description>
+    <DesktopBuildNumber Condition="'$(DesktopBuildNumber)' == ''">0</DesktopBuildNumber>
     <Version>1.0.0</Version>
+    <InformationalVersion>1.0.0+build.$(DesktopBuildNumber)</InformationalVersion>
     <FileVersion>1.0.0.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <Copyright>Copyright © Luis Apps Inc.</Copyright>
