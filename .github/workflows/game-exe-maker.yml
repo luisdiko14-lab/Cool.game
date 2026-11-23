@@ -55,7 +55,14 @@ jobs:
           $required = @("$p/Neon_Swarm.exe","$p/Neon_Swarm_Crash_Handler.exe","$p/Neon_Swarm.dll","$p/Game/index.html","$p/Game/neon_swarm_features.js","$p/Game/neon_swarm_expansion.js","$p/Game/neon_swarm_apex.js","$p/Game/Raya(Slowed).mp3")
           foreach ($f in $required) { if (-not (Test-Path $f)) { throw "Missing build output: $f" } }
           & "$p/Neon_Swarm.exe" --server-smoke-test
-          if ($LASTEXITCODE -ne 0) { throw "Desktop local-server test failed." }
+          if ($LASTEXITCODE -ne 0) {
+            $diagnostic = Join-Path $env:LOCALAPPDATA "NeonSwarm/Neon_Swarm_Crash.log"
+            if (Test-Path $diagnostic) {
+              Write-Host "Desktop host diagnostics:"
+              Get-Content $diagnostic -Tail 80
+            }
+            throw "Desktop local-server test failed."
+          }
           & "$p/Neon_Swarm_Crash_Handler.exe" --smoke-test
           if ($LASTEXITCODE -ne 0) { throw "Crash-handler smoke test failed." }
 
