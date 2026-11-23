@@ -194,7 +194,7 @@ internal static class Program
 internal static class CrashLog
 {
     private static readonly object Gate = new();
-    public static string DataDirectory => GameServer.DataDirectory;
+    public static string DataDirectory => DesktopPaths.DataDirectory;
 
     public static void Write(string title, Exception ex) => Write(title + Environment.NewLine + ex);
 
@@ -295,7 +295,7 @@ internal sealed class MainForm : Form
         try
         {
             await _server.StartAsync();
-            string profile = Path.Combine(GameServer.DataDirectory, "WebView2");
+            string profile = Path.Combine(DesktopPaths.DataDirectory, "WebView2");
             Directory.CreateDirectory(profile);
             var environment = await CoreWebView2Environment.CreateAsync(null, profile);
             await _browser.EnsureCoreWebView2Async(environment);
@@ -450,7 +450,7 @@ internal sealed class MainForm : Form
 
     private void OpenSaves()
     {
-        try { Process.Start(new ProcessStartInfo("explorer.exe", GameServer.DataDirectory) { UseShellExecute = true }); }
+        try { Process.Start(new ProcessStartInfo("explorer.exe", DesktopPaths.DataDirectory) { UseShellExecute = true }); }
         catch (Exception ex) { CrashLog.Write("Could not open save folder", ex); }
     }
 
@@ -507,7 +507,7 @@ internal sealed class PythonGameHost : IDisposable
         probe.Stop();
         BaseUrl = $"http://127.0.0.1:{port}/";
 
-        string logPath = Path.Combine(GameServer.DataDirectory, "neon_web_python.log");
+        string logPath = Path.Combine(DesktopPaths.DataDirectory, "neon_web_python.log");
         var start = new ProcessStartInfo(executable)
         {
             UseShellExecute = false,
@@ -518,7 +518,7 @@ internal sealed class PythonGameHost : IDisposable
         foreach (string arg in new[] { "--server", "--lan", "--no-browser", "--port", port.ToString(),
                      "--log-file", logPath })
             start.ArgumentList.Add(arg);
-        start.Environment["NEON_SWARM_APP_DIR"] = GameServer.DataDirectory;
+        start.Environment["NEON_SWARM_APP_DIR"] = DesktopPaths.DataDirectory;
         _process = new Process { StartInfo = start, EnableRaisingEvents = true };
         if (!_process.Start())
             throw new InvalidOperationException("Windows could not start neon_web_python.exe.");
@@ -589,259 +589,19 @@ internal sealed class PythonGameHost : IDisposable
     }
 }
 
-internal sealed class GameServer : IDisposable
+internal static class DesktopPaths
 {
-    private static readonly HashSet<string> AllowedSaveKeys = new(StringComparer.Ordinal)
-    {
-        "neonswarm.scores","neonswarm.profile","neonswarm.settings",
-        "neonswarm.admin","neonswarm.arcade","neonswarm.features"
-    };
-    private readonly HttpListener _listener = new();
-    private readonly CancellationTokenSource _stop = new();
-    private readonly SemaphoreSlim _storage = new(1, 1);
-    private readonly string _root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Game"));
-    private readonly string _scores = Path.Combine(DataDirectory, "desktop-scores.json");
-    private readonly string _saves = Path.Combine(DataDirectory, "desktop-saves.json");
-
     public static string DataDirectory
     {
         get
         {
             string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string path = Path.Combine(string.IsNullOrWhiteSpace(local) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : local, "NeonSwarm");
+            string path = Path.Combine(string.IsNullOrWhiteSpace(local)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+                : local, "NeonSwarm");
             Directory.CreateDirectory(path);
             return path;
         }
-    }
-    public string BaseUrl { get; private set; } = "";
-
-    public Task StartAsync()
-    {
-        if (!File.Exists(Path.Combine(_root, "index.html")))
-            throw new FileNotFoundException("Game/index.html is missing from the published app.", _root);
-        using var probe = new TcpListener(IPAddress.Loopback, 0);
-        probe.Start();
-        int port = ((IPEndPoint)probe.LocalEndpoint).Port;
-        probe.Stop();
-        BaseUrl = $"http://127.0.0.1:{port}/";
-        _listener.Prefixes.Add(BaseUrl);
-        _listener.Start();
-        _ = ListenAsync(_stop.Token);
-        return Task.CompletedTask;
-    }
-
-    private async Task ListenAsync(CancellationToken token)
-    {
-        while (!token.IsCancellationRequested)
-        {
-            HttpListenerContext context;
-            try { context = await _listener.GetContextAsync().WaitAsync(token); }
-            catch (OperationCanceledException) { break; }
-            catch (HttpListenerException) when (token.IsCancellationRequested) { break; }
-            catch (ObjectDisposedException) { break; }
-            _ = HandleAsync(context, token);
-        }
-    }
-
-    private async Task HandleAsync(HttpListenerContext c, CancellationToken token)
-    {
-        try
-        {
-            string path = Uri.UnescapeDataString(c.Request.Url?.AbsolutePath ?? "/");
-            if (path == "/") path = "/index.html";
-            if (path == "/api/auth") { await Text(c, "{\"configured\":false,\"authenticated\":false}", "application/json", 200, token); return; }
-            if (path == "/api/scores") { await Scores(c, token); return; }
-            if (path == "/api/saves") { await Saves(c, token); return; }
-            if (c.Request.HttpMethod is not ("GET" or "HEAD")) { await Text(c, "Method not allowed", "text/plain", 405, token); return; }
-
-            string relative = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
-            string full = Path.GetFullPath(Path.Combine(_root, relative));
-            string prefix = _root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { await Text(c, "Bad path", "text/plain", 400, token); return; }
-            if (!File.Exists(full)) { await Text(c, "Not found", "text/plain", 404, token); return; }
-
-            if (Path.GetFileName(full).Equals("index.html", StringComparison.OrdinalIgnoreCase))
-            {
-                string html = await File.ReadAllTextAsync(full, token);
-                html = html.Replace("https://raw.githubusercontent.com/luisdiko14-lab/Cool.game/main/Raya%28Slowed%29.mp3", "/Raya(Slowed).mp3", StringComparison.OrdinalIgnoreCase);
-                html = html.Replace("https://raw.githubusercontent.com/luisdiko14-lab/Cool.game/main/Raya(Slowed).mp3", "/Raya(Slowed).mp3", StringComparison.OrdinalIgnoreCase);
-                await Text(c, html, "text/html", 200, token);
-                return;
-            }
-            if (Path.GetExtension(full).Equals(".mp3", StringComparison.OrdinalIgnoreCase)) { await Audio(c, full, token); return; }
-            await Bytes(c, await File.ReadAllBytesAsync(full, token), TypeOf(full), 200, token);
-        }
-        catch (OperationCanceledException) { QuietClose(c); }
-        catch (Exception ex) { QuietClose(c); CrashLog.Write("Local HTTP request failed", ex); }
-    }
-
-    private async Task Scores(HttpListenerContext c, CancellationToken token)
-    {
-        if (c.Request.HttpMethod == "GET")
-        {
-            await _storage.WaitAsync(token);
-            List<Score> readRows;
-            try { readRows = ReadScores(); } finally { _storage.Release(); }
-            await Text(c, JsonSerializer.Serialize(new { scores = readRows }), "application/json", 200, token);
-            return;
-        }
-        if (c.Request.HttpMethod != "POST") { await Text(c, "Method not allowed", "text/plain", 405, token); return; }
-        using JsonDocument doc = await ReadJson(c.Request, 4096, token);
-        JsonElement root = doc.RootElement;
-        if (!root.TryGetProperty("name", out var n) || !root.TryGetProperty("score", out var s) ||
-            !s.TryGetInt64(out long value) || value <= 0 || value > 9007199254740991)
-        { await Text(c, "{\"error\":\"Invalid score\"}", "application/json", 400, token); return; }
-        string name = n.ValueKind == JsonValueKind.String ? n.GetString() ?? "Player" : "Player";
-        name = Regex.Replace(name, @"[^\w -]", "", RegexOptions.CultureInvariant);
-        name = string.IsNullOrWhiteSpace(name) ? "Player" : name[..Math.Min(12, name.Length)].Trim();
-
-        await _storage.WaitAsync(token);
-        List<Score> rows;
-        try
-        {
-            rows = ReadScores();
-            rows.Add(new Score { n = name, s = value });
-            rows = rows.OrderByDescending(x => x.s).Take(10).ToList();
-            await AtomicWrite(_scores, JsonSerializer.Serialize(rows), token);
-        }
-        finally { _storage.Release(); }
-        await Text(c, JsonSerializer.Serialize(new { scores = rows }), "application/json", 200, token);
-    }
-
-    private async Task Saves(HttpListenerContext c, CancellationToken token)
-    {
-        if (c.Request.HttpMethod == "GET")
-        {
-            string readToken = c.Request.Headers["X-Save-Token"] ?? "";
-            if (!Regex.IsMatch(readToken, "^[a-f0-9]{32}$", RegexOptions.CultureInvariant))
-            { await Text(c, "{\"error\":\"Invalid save token\"}", "application/json", 400, token); return; }
-            await _storage.WaitAsync(token);
-            string json = "{}";
-            try { if (File.Exists(_saves)) { using var d = JsonDocument.Parse(await File.ReadAllTextAsync(_saves, token)); if (d.RootElement.ValueKind == JsonValueKind.Object) json = d.RootElement.GetRawText(); } }
-            catch (JsonException) { json = "{}"; }
-            finally { _storage.Release(); }
-            await Text(c, "{\"data\":" + json + "}", "application/json", 200, token);
-            return;
-        }
-        if (c.Request.HttpMethod != "POST") { await Text(c, "Method not allowed", "text/plain", 405, token); return; }
-        using JsonDocument doc = await ReadJson(c.Request, 524288, token);
-        JsonElement root = doc.RootElement;
-        string id = root.TryGetProperty("token", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() ?? "" : "";
-        if (!Regex.IsMatch(id, "^[a-f0-9]{32}$", RegexOptions.CultureInvariant) ||
-            !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
-        { await Text(c, "{\"error\":\"Invalid save data\"}", "application/json", 400, token); return; }
-        foreach (var field in data.EnumerateObject())
-            if (!AllowedSaveKeys.Contains(field.Name) || field.Value.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array) ||
-                Encoding.UTF8.GetByteCount(field.Value.GetRawText()) > 131072)
-            { await Text(c, "{\"error\":\"Unsupported save section\"}", "application/json", 400, token); return; }
-        await _storage.WaitAsync(token);
-        try { await AtomicWrite(_saves, data.GetRawText(), token); }
-        finally { _storage.Release(); }
-        await Text(c, "{\"ok\":true}", "application/json", 200, token);
-    }
-
-    private List<Score> ReadScores()
-    {
-        try
-        {
-            if (!File.Exists(_scores)) return new();
-            return JsonSerializer.Deserialize<List<Score>>(File.ReadAllText(_scores))?
-                .Where(x => x.s > 0 && x.s <= 9007199254740991).OrderByDescending(x => x.s).Take(10).ToList() ?? new();
-        }
-        catch { return new(); }
-    }
-
-    private static async Task<JsonDocument> ReadJson(HttpListenerRequest req, int maximum, CancellationToken token)
-    {
-        using var memory = new MemoryStream();
-        byte[] buffer = new byte[8192];
-        while (true)
-        {
-            int count = await req.InputStream.ReadAsync(buffer.AsMemory(), token);
-            if (count == 0) break;
-            if (memory.Length + count > maximum) throw new InvalidDataException("Request body too large.");
-            memory.Write(buffer, 0, count);
-        }
-        if (memory.Length == 0) throw new InvalidDataException("Request body is empty.");
-        return JsonDocument.Parse(memory.ToArray());
-    }
-
-    private static async Task AtomicWrite(string path, string content, CancellationToken token)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        string temp = path + ".tmp";
-        await File.WriteAllTextAsync(temp, content, Encoding.UTF8, token);
-        File.Move(temp, path, true);
-    }
-
-    private static async Task Audio(HttpListenerContext c, string path, CancellationToken token)
-    {
-        byte[] audio = await File.ReadAllBytesAsync(path, token);
-        long first = 0, last = audio.LongLength - 1;
-        int status = 200;
-        string? range = c.Request.Headers["Range"];
-        if (!string.IsNullOrWhiteSpace(range) && range.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase))
-        {
-            try
-            {
-                string[] parts = range[6..].Split('-', 2);
-                if (parts[0].Length == 0) first = Math.Max(0, audio.LongLength - long.Parse(parts[1]));
-                else { first = long.Parse(parts[0]); if (parts[1].Length > 0) last = Math.Min(last, long.Parse(parts[1])); }
-                if (first < 0 || first > last || first >= audio.LongLength) throw new FormatException();
-                status = 206;
-            }
-            catch { c.Response.StatusCode = 416; c.Response.AddHeader("Content-Range", $"bytes */{audio.LongLength}"); c.Response.Close(); return; }
-        }
-        int length = checked((int)(last - first + 1));
-        c.Response.StatusCode = status; c.Response.ContentType = "audio/mpeg"; c.Response.ContentLength64 = length;
-        c.Response.AddHeader("Accept-Ranges", "bytes");
-        if (status == 206) c.Response.AddHeader("Content-Range", $"bytes {first}-{last}/{audio.LongLength}");
-        await c.Response.OutputStream.WriteAsync(audio.AsMemory(checked((int)first), length), token);
-        c.Response.Close();
-    }
-
-    private static async Task Text(HttpListenerContext c, string value, string type, int status, CancellationToken token)
-    {
-        byte[] bytes = Encoding.UTF8.GetBytes(value);
-        c.Response.StatusCode = status; c.Response.ContentType = type + "; charset=utf-8";
-        c.Response.ContentLength64 = bytes.Length; c.Response.Headers["Cache-Control"] = "no-store";
-        c.Response.Headers["X-Content-Type-Options"] = "nosniff";
-        if (c.Request.HttpMethod != "HEAD") await c.Response.OutputStream.WriteAsync(bytes.AsMemory(), token);
-        c.Response.Close();
-    }
-
-    private static async Task Bytes(HttpListenerContext c, byte[] bytes, string type, int status, CancellationToken token)
-    {
-        c.Response.StatusCode = status; c.Response.ContentType = type; c.Response.ContentLength64 = bytes.LongLength;
-        c.Response.Headers["X-Content-Type-Options"] = "nosniff";
-        await c.Response.OutputStream.WriteAsync(bytes.AsMemory(), token);
-        c.Response.Close();
-    }
-
-    private static string TypeOf(string path) => Path.GetExtension(path).ToLowerInvariant() switch
-    {
-        ".html" => "text/html; charset=utf-8", ".js" => "application/javascript; charset=utf-8",
-        ".css" => "text/css; charset=utf-8", ".json" => "application/json; charset=utf-8",
-        ".svg" => "image/svg+xml", ".png" => "image/png", ".jpg" or ".jpeg" => "image/jpeg",
-        ".webp" => "image/webp", ".mp3" => "audio/mpeg", ".woff2" => "font/woff2",
-        _ => "application/octet-stream"
-    };
-
-    private static void QuietClose(HttpListenerContext c) { try { c.Response.Close(); } catch { } }
-
-    public void Dispose()
-    {
-        _stop.Cancel();
-        try { if (_listener.IsListening) _listener.Stop(); } catch { }
-        _listener.Close();
-        _storage.Dispose();
-        _stop.Dispose();
-    }
-
-    private sealed class Score
-    {
-        public string n { get; set; } = "Player";
-        public long s { get; set; }
     }
 }
 
