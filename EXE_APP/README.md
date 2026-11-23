@@ -45,3 +45,11 @@ The Windows package includes:
 - Neon_Swarm_Pick.exe and its DLL — startup resolution and render-profile picker.
 
 Admin commands are local gameplay overrides, not secure server administration. The password remains the one already defined by the existing game's Admin module.
+
+## Python-hosted desktop runtime and multiplayer
+
+The desktop host does not load a prebuilt static HTML file as its runtime anymore. It starts `neon_web_python.exe --server --lan --no-browser` on a free port, checks `/api/health`, and then navigates WebView2 to the local Python HTTP server. The Python server binds to the local network for room hosting; Windows Firewall may ask for permission.
+
+In the Round 2 Command Center, open **Servers** to fetch the live room directory, host a room, or join another room. On the host PC, share the LAN address shown in the server address field. Players on the same Wi-Fi can connect using that address and port. Internet players need a publicly reachable host (or router port forwarding); a local desktop server is not automatically exposed to the internet.
+
+Room membership, presence and pilot positions are synchronized by the Python backend. The current build does not synchronize authoritative enemy waves, shots or shared damage between players, so each connected pilot still runs their own combat simulation. Room listings, marketplace sessions and listings, shared community challenges and current live-event totals are stored in the running server process and reset when that process restarts.

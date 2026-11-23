@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text;
@@ -87,26 +88,87 @@ internal static class Program
     {
         try
         {
-            using var server = new GameServer();
+            using var server = new PythonGameHost();
             await server.StartAsync();
             using var client = new HttpClient { BaseAddress = new Uri(server.BaseUrl) };
+            string health = await client.GetStringAsync("api/health");
+            Check(health.Contains("neon-web-python"), "Python server health endpoint is missing.");
             string html = await client.GetStringAsync("");
-            Check(html.Contains("menu-shell"), "Updated menu HTML is missing.");
-            Check(html.Contains("export-progress"), "Save-transfer controls are missing.");
+            Check(html.Contains("menu-shell"), "Python-served game HTML is missing.");
             Check(html.Contains("NeonSwarmDesktopAdmin"), "Desktop admin bridge is missing.");
             Check(html.Contains("DesktopRenderOptions"), "Render profile logic is missing.");
-            foreach (string module in new[] { "neon_swarm_features.js", "neon_swarm_expansion.js", "neon_swarm_apex.js" })
+            foreach (string module in new[] { "neon_swarm_features.js", "neon_swarm_expansion.js", "neon_swarm_apex.js", "neon_swarm_ultimate.js", "neon_swarm_round2.js" })
                 Check((await client.GetStringAsync(module)).Length > 100, $"Game module is missing: {module}");
             Check((await client.GetAsync("api/auth")).IsSuccessStatusCode, "Offline auth status failed.");
+            Check((await client.GetAsync("api/rooms")).IsSuccessStatusCode, "Room directory read failed.");
+            Check((await client.GetAsync("api/events")).IsSuccessStatusCode, "Live event read failed.");
+
+            using var roomPayload = new StringContent("{\"name\":\"CI Lobby\",\"playerName\":\"CI Pilot\",\"maxPlayers\":4}", Encoding.UTF8, "application/json");
+            using var createdRoom = await client.PostAsync("api/rooms", roomPayload);
+            Check((int)createdRoom.StatusCode == 201, "Python room creation failed.");
+            using var roomDoc = JsonDocument.Parse(await createdRoom.Content.ReadAsStringAsync());
+            string roomId = roomDoc.RootElement.GetProperty("room").GetProperty("id").GetString() ?? "";
+            string roomToken = roomDoc.RootElement.GetProperty("token").GetString() ?? "";
+            Check(roomId.Length > 0 && roomToken.Length > 0, "Room credentials were not returned.");
+            using var joinPayload = new StringContent("{\"playerName\":\"CI Joiner\"}", Encoding.UTF8, "application/json");
+            using var joinResponse = await client.PostAsync($"api/rooms/{roomId}/join", joinPayload);
+            Check(joinResponse.IsSuccessStatusCode, "Python room join failed.");
+            using var joinDoc = JsonDocument.Parse(await joinResponse.Content.ReadAsStringAsync());
+            string joinToken = joinDoc.RootElement.GetProperty("token").GetString() ?? "";
+            Check(joinToken.Length > 0, "Join token was not returned.");
+            using var heartbeat = new HttpRequestMessage(HttpMethod.Post, $"api/rooms/{roomId}/heartbeat");
+            heartbeat.Headers.Add("X-Player-Token", roomToken);
+            heartbeat.Content = new StringContent("{\"x\":0.4,\"y\":0.7,\"hp\":150,\"score\":123}", Encoding.UTF8, "application/json");
+            using var beatResponse = await client.SendAsync(heartbeat);
+            Check(beatResponse.IsSuccessStatusCode, "Room player heartbeat failed.");
+
+            using var marketSession = new StringContent("{\"name\":\"CI Seller\"}", Encoding.UTF8, "application/json");
+            using var marketResponse = await client.PostAsync("api/market/session", marketSession);
+            Check((int)marketResponse.StatusCode == 201, "Marketplace seller session creation failed.");
+            using var marketDoc = JsonDocument.Parse(await marketResponse.Content.ReadAsStringAsync());
+            string marketToken = marketDoc.RootElement.GetProperty("token").GetString() ?? "";
+            using var listingPayload = new StringContent("{\"item\":{\"name\":\"Test Relic\",\"rarity\":\"RARE\",\"kind\":\"collectible\"},\"price\":200}", Encoding.UTF8, "application/json");
+            using var listingRequest = new HttpRequestMessage(HttpMethod.Post, "api/market/listings");
+            listingRequest.Headers.Add("X-Market-Token", marketToken);
+            listingRequest.Content = listingPayload;
+            using var listingResponse = await client.SendAsync(listingRequest);
+            Check((int)listingResponse.StatusCode == 201, "Marketplace item listing failed.");
+            using var listingDoc = JsonDocument.Parse(await listingResponse.Content.ReadAsStringAsync());
+            string listingId = listingDoc.RootElement.GetProperty("listing").GetProperty("id").GetString() ?? "";
+            using var buyerPayload = new StringContent("{\"name\":\"CI Buyer\"}", Encoding.UTF8, "application/json");
+            using var buyerResponse = await client.PostAsync("api/market/session", buyerPayload);
+            using var buyerDoc = JsonDocument.Parse(await buyerResponse.Content.ReadAsStringAsync());
+            string buyerToken = buyerDoc.RootElement.GetProperty("token").GetString() ?? "";
+            using var buyRequest = new HttpRequestMessage(HttpMethod.Post, $"api/market/listings/{listingId}/buy");
+            buyRequest.Headers.Add("X-Market-Token", buyerToken);
+            buyRequest.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+            using var buyResponse = await client.SendAsync(buyRequest);
+            Check(buyResponse.IsSuccessStatusCode, "Marketplace purchase failed.");
+            using var accountRequest = new HttpRequestMessage(HttpMethod.Get, "api/market/account");
+            accountRequest.Headers.Add("X-Market-Token", buyerToken);
+            using var accountResponse = await client.SendAsync(accountRequest);
+            using var accountDoc = JsonDocument.Parse(await accountResponse.Content.ReadAsStringAsync());
+            Check(accountDoc.RootElement.GetProperty("deliveries").GetArrayLength() == 1, "Purchased item was not delivered.");
+
+            using var challengePayload = new StringContent("{\"name\":\"CI Challenge\",\"wave\":12,\"density\":1.5,\"seed\":1234}", Encoding.UTF8, "application/json");
+            using var challengeResponse = await client.PostAsync("api/challenges", challengePayload);
+            Check((int)challengeResponse.StatusCode == 201, "Shared challenge publish failed.");
+            using var challengeList = await client.GetAsync("api/challenges");
+            using var challengeDoc = JsonDocument.Parse(await challengeList.Content.ReadAsStringAsync());
+            Check(challengeDoc.RootElement.GetProperty("challenges").GetArrayLength() > 0, "Shared challenge directory is empty.");
+
+            using var eventPayload = new StringContent("{\"kills\":5}", Encoding.UTF8, "application/json");
+            using var eventResponse = await client.PostAsync("api/events/contribute", eventPayload);
+            Check(eventResponse.IsSuccessStatusCode, "Live event contribution failed.");
+            using var corsRequest = new HttpRequestMessage(HttpMethod.Options, "api/rooms");
+            corsRequest.Headers.Add("Origin", "https://another-pilot.example");
+            using var corsResponse = await client.SendAsync(corsRequest);
+            Check(corsResponse.Headers.TryGetValues("Access-Control-Allow-Origin", out var corsValues) && corsValues.Contains("*"), "Cross-origin lobby access is not enabled.");
 
             using var score = new StringContent("{\"name\":\"CI Pilot\",\"score\":12345}", Encoding.UTF8, "application/json");
             Check((await client.PostAsync("api/scores", score)).IsSuccessStatusCode, "Offline leaderboard write failed.");
-
-            using var save = new StringContent(
-                "{\"token\":\"0123456789abcdef0123456789abcdef\",\"data\":{\"neonswarm.profile\":{\"credits\":10}}}",
-                Encoding.UTF8, "application/json");
+            using var save = new StringContent("{\"token\":\"0123456789abcdef0123456789abcdef\",\"data\":{\"neonswarm.profile\":{\"credits\":10}}}", Encoding.UTF8, "application/json");
             Check((await client.PostAsync("api/saves", save)).IsSuccessStatusCode, "Offline save write failed.");
-
             using var request = new HttpRequestMessage(HttpMethod.Get, "Raya(Slowed).mp3");
             request.Headers.Range = new RangeHeaderValue(0, 15);
             using var audio = await client.SendAsync(request);
@@ -116,9 +178,9 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            CrashLog.Write("Desktop server smoke test failed", ex);
+            CrashLog.Write("Python desktop server smoke test failed", ex);
             try { File.WriteAllText(Path.Combine(Path.GetTempPath(), "NeonSwarm-SmokeTest.log"), ex.ToString()); } catch { }
-            Console.Error.WriteLine("Desktop server smoke test failed:");
+            Console.Error.WriteLine("Python desktop server smoke test failed:");
             Console.Error.WriteLine(ex);
             return 1;
         }
@@ -133,7 +195,7 @@ internal static class Program
 internal static class CrashLog
 {
     private static readonly object Gate = new();
-    public static string DataDirectory => GameServer.DataDirectory;
+    public static string DataDirectory => DesktopPaths.DataDirectory;
 
     public static void Write(string title, Exception ex) => Write(title + Environment.NewLine + ex);
 
@@ -152,7 +214,7 @@ internal static class CrashLog
 
 internal sealed class MainForm : Form
 {
-    private readonly GameServer _server = new();
+    private readonly PythonGameHost _server = new();
     private readonly WebView2 _browser = new();
     private readonly ToolStripStatusLabel _status = new();
     private readonly LaunchOptions _launchOptions;
@@ -234,7 +296,7 @@ internal sealed class MainForm : Form
         try
         {
             await _server.StartAsync();
-            string profile = Path.Combine(GameServer.DataDirectory, "WebView2");
+            string profile = Path.Combine(DesktopPaths.DataDirectory, "WebView2");
             Directory.CreateDirectory(profile);
             var environment = await CoreWebView2Environment.CreateAsync(null, profile);
             await _browser.EnsureCoreWebView2Async(environment);
@@ -244,7 +306,7 @@ internal sealed class MainForm : Form
             core.Settings.IsStatusBarEnabled = false;
             core.Settings.IsZoomControlEnabled = false;
             core.NavigationCompleted += (_, a) =>
-                _status.Text = a.IsSuccess ? "OFFLINE READY  •  LOCAL SAVES AND LEADERBOARD ENABLED"
+                _status.Text = a.IsSuccess ? "PYTHON HOST READY  •  LOCAL + LAN SERVER ACTIVE"
                     : "GAME PAGE DID NOT LOAD  •  PRESS RELOAD TO RETRY";
             core.DocumentTitleChanged += (_, _) =>
             {
@@ -268,7 +330,7 @@ internal sealed class MainForm : Form
                 "&vfx=" + (_launchOptions.Vfx ? "on" : "off") +
                 "&animations=" + (_launchOptions.Animations ? "on" : "off");
             core.Navigate(_server.BaseUrl + query);
-            _status.Text = "OFFLINE READY  •  LOCAL SAVES AND LEADERBOARD ENABLED";
+            _status.Text = "PYTHON HOST READY  •  LOCAL + LAN SERVER ACTIVE";
         }
         catch (Exception ex)
         {
@@ -389,7 +451,7 @@ internal sealed class MainForm : Form
 
     private void OpenSaves()
     {
-        try { Process.Start(new ProcessStartInfo("explorer.exe", GameServer.DataDirectory) { UseShellExecute = true }); }
+        try { Process.Start(new ProcessStartInfo("explorer.exe", DesktopPaths.DataDirectory) { UseShellExecute = true }); }
         catch (Exception ex) { CrashLog.Write("Could not open save folder", ex); }
     }
 
@@ -428,259 +490,119 @@ internal sealed class MainForm : Form
     }
 }
 
-internal sealed class GameServer : IDisposable
+internal sealed class PythonGameHost : IDisposable
 {
-    private static readonly HashSet<string> AllowedSaveKeys = new(StringComparer.Ordinal)
-    {
-        "neonswarm.scores","neonswarm.profile","neonswarm.settings",
-        "neonswarm.admin","neonswarm.arcade","neonswarm.features"
-    };
-    private readonly HttpListener _listener = new();
-    private readonly CancellationTokenSource _stop = new();
-    private readonly SemaphoreSlim _storage = new(1, 1);
-    private readonly string _root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Game"));
-    private readonly string _scores = Path.Combine(DataDirectory, "desktop-scores.json");
-    private readonly string _saves = Path.Combine(DataDirectory, "desktop-saves.json");
-
-    public static string DataDirectory
-    {
-        get
-        {
-            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string path = Path.Combine(string.IsNullOrWhiteSpace(local) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : local, "NeonSwarm");
-            Directory.CreateDirectory(path);
-            return path;
-        }
-    }
+    private Process? _process;
+    private bool _disposed;
     public string BaseUrl { get; private set; } = "";
 
-    public Task StartAsync()
+    public async Task StartAsync()
     {
-        if (!File.Exists(Path.Combine(_root, "index.html")))
-            throw new FileNotFoundException("Game/index.html is missing from the published app.", _root);
+        string executable = Path.Combine(AppContext.BaseDirectory, "neon_web_python.exe");
+        if (!File.Exists(executable))
+            throw new FileNotFoundException("neon_web_python.exe is missing from the published app.", executable);
+
         using var probe = new TcpListener(IPAddress.Loopback, 0);
         probe.Start();
         int port = ((IPEndPoint)probe.LocalEndpoint).Port;
         probe.Stop();
         BaseUrl = $"http://127.0.0.1:{port}/";
-        _listener.Prefixes.Add(BaseUrl);
-        _listener.Start();
-        _ = ListenAsync(_stop.Token);
-        return Task.CompletedTask;
-    }
 
-    private async Task ListenAsync(CancellationToken token)
-    {
-        while (!token.IsCancellationRequested)
+        string logPath = Path.Combine(DesktopPaths.DataDirectory, "neon_web_python.log");
+        var start = new ProcessStartInfo(executable)
         {
-            HttpListenerContext context;
-            try { context = await _listener.GetContextAsync().WaitAsync(token); }
-            catch (OperationCanceledException) { break; }
-            catch (HttpListenerException) when (token.IsCancellationRequested) { break; }
-            catch (ObjectDisposedException) { break; }
-            _ = HandleAsync(context, token);
-        }
-    }
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            WorkingDirectory = AppContext.BaseDirectory
+        };
+        foreach (string arg in new[] { "--server", "--lan", "--no-browser", "--port", port.ToString(),
+                     "--log-file", logPath })
+            start.ArgumentList.Add(arg);
+        start.Environment["NEON_SWARM_APP_DIR"] = DesktopPaths.DataDirectory;
+        _process = new Process { StartInfo = start, EnableRaisingEvents = true };
+        if (!_process.Start())
+            throw new InvalidOperationException("Windows could not start neon_web_python.exe.");
 
-    private async Task HandleAsync(HttpListenerContext c, CancellationToken token)
-    {
-        try
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        Exception? lastError = null;
+        while (DateTimeOffset.UtcNow < deadline)
         {
-            string path = Uri.UnescapeDataString(c.Request.Url?.AbsolutePath ?? "/");
-            if (path == "/") path = "/index.html";
-            if (path == "/api/auth") { await Text(c, "{\"configured\":false,\"authenticated\":false}", "application/json", 200, token); return; }
-            if (path == "/api/scores") { await Scores(c, token); return; }
-            if (path == "/api/saves") { await Saves(c, token); return; }
-            if (c.Request.HttpMethod is not ("GET" or "HEAD")) { await Text(c, "Method not allowed", "text/plain", 405, token); return; }
-
-            string relative = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
-            string full = Path.GetFullPath(Path.Combine(_root, relative));
-            string prefix = _root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { await Text(c, "Bad path", "text/plain", 400, token); return; }
-            if (!File.Exists(full)) { await Text(c, "Not found", "text/plain", 404, token); return; }
-
-            if (Path.GetFileName(full).Equals("index.html", StringComparison.OrdinalIgnoreCase))
+            if (_process.HasExited)
             {
-                string html = await File.ReadAllTextAsync(full, token);
-                html = html.Replace("https://raw.githubusercontent.com/luisdiko14-lab/Cool.game/main/Raya%28Slowed%29.mp3", "/Raya(Slowed).mp3", StringComparison.OrdinalIgnoreCase);
-                html = html.Replace("https://raw.githubusercontent.com/luisdiko14-lab/Cool.game/main/Raya(Slowed).mp3", "/Raya(Slowed).mp3", StringComparison.OrdinalIgnoreCase);
-                await Text(c, html, "text/html", 200, token);
-                return;
+                string log = ReadLogTail(logPath);
+                throw new InvalidOperationException(
+                    $"The Python game backend exited with code {_process.ExitCode}. {log}");
             }
-            if (Path.GetExtension(full).Equals(".mp3", StringComparison.OrdinalIgnoreCase)) { await Audio(c, full, token); return; }
-            await Bytes(c, await File.ReadAllBytesAsync(full, token), TypeOf(full), 200, token);
-        }
-        catch (OperationCanceledException) { QuietClose(c); }
-        catch (Exception ex) { QuietClose(c); CrashLog.Write("Local HTTP request failed", ex); }
-    }
-
-    private async Task Scores(HttpListenerContext c, CancellationToken token)
-    {
-        if (c.Request.HttpMethod == "GET")
-        {
-            await _storage.WaitAsync(token);
-            List<Score> readRows;
-            try { readRows = ReadScores(); } finally { _storage.Release(); }
-            await Text(c, JsonSerializer.Serialize(new { scores = readRows }), "application/json", 200, token);
-            return;
-        }
-        if (c.Request.HttpMethod != "POST") { await Text(c, "Method not allowed", "text/plain", 405, token); return; }
-        using JsonDocument doc = await ReadJson(c.Request, 4096, token);
-        JsonElement root = doc.RootElement;
-        if (!root.TryGetProperty("name", out var n) || !root.TryGetProperty("score", out var s) ||
-            !s.TryGetInt64(out long value) || value <= 0 || value > 9007199254740991)
-        { await Text(c, "{\"error\":\"Invalid score\"}", "application/json", 400, token); return; }
-        string name = n.ValueKind == JsonValueKind.String ? n.GetString() ?? "Player" : "Player";
-        name = Regex.Replace(name, @"[^\w -]", "", RegexOptions.CultureInvariant);
-        name = string.IsNullOrWhiteSpace(name) ? "Player" : name[..Math.Min(12, name.Length)].Trim();
-
-        await _storage.WaitAsync(token);
-        List<Score> rows;
-        try
-        {
-            rows = ReadScores();
-            rows.Add(new Score { n = name, s = value });
-            rows = rows.OrderByDescending(x => x.s).Take(10).ToList();
-            await AtomicWrite(_scores, JsonSerializer.Serialize(rows), token);
-        }
-        finally { _storage.Release(); }
-        await Text(c, JsonSerializer.Serialize(new { scores = rows }), "application/json", 200, token);
-    }
-
-    private async Task Saves(HttpListenerContext c, CancellationToken token)
-    {
-        if (c.Request.HttpMethod == "GET")
-        {
-            string readToken = c.Request.Headers["X-Save-Token"] ?? "";
-            if (!Regex.IsMatch(readToken, "^[a-f0-9]{32}$", RegexOptions.CultureInvariant))
-            { await Text(c, "{\"error\":\"Invalid save token\"}", "application/json", 400, token); return; }
-            await _storage.WaitAsync(token);
-            string json = "{}";
-            try { if (File.Exists(_saves)) { using var d = JsonDocument.Parse(await File.ReadAllTextAsync(_saves, token)); if (d.RootElement.ValueKind == JsonValueKind.Object) json = d.RootElement.GetRawText(); } }
-            catch (JsonException) { json = "{}"; }
-            finally { _storage.Release(); }
-            await Text(c, "{\"data\":" + json + "}", "application/json", 200, token);
-            return;
-        }
-        if (c.Request.HttpMethod != "POST") { await Text(c, "Method not allowed", "text/plain", 405, token); return; }
-        using JsonDocument doc = await ReadJson(c.Request, 524288, token);
-        JsonElement root = doc.RootElement;
-        string id = root.TryGetProperty("token", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() ?? "" : "";
-        if (!Regex.IsMatch(id, "^[a-f0-9]{32}$", RegexOptions.CultureInvariant) ||
-            !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
-        { await Text(c, "{\"error\":\"Invalid save data\"}", "application/json", 400, token); return; }
-        foreach (var field in data.EnumerateObject())
-            if (!AllowedSaveKeys.Contains(field.Name) || field.Value.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array) ||
-                Encoding.UTF8.GetByteCount(field.Value.GetRawText()) > 131072)
-            { await Text(c, "{\"error\":\"Unsupported save section\"}", "application/json", 400, token); return; }
-        await _storage.WaitAsync(token);
-        try { await AtomicWrite(_saves, data.GetRawText(), token); }
-        finally { _storage.Release(); }
-        await Text(c, "{\"ok\":true}", "application/json", 200, token);
-    }
-
-    private List<Score> ReadScores()
-    {
-        try
-        {
-            if (!File.Exists(_scores)) return new();
-            return JsonSerializer.Deserialize<List<Score>>(File.ReadAllText(_scores))?
-                .Where(x => x.s > 0 && x.s <= 9007199254740991).OrderByDescending(x => x.s).Take(10).ToList() ?? new();
-        }
-        catch { return new(); }
-    }
-
-    private static async Task<JsonDocument> ReadJson(HttpListenerRequest req, int maximum, CancellationToken token)
-    {
-        using var memory = new MemoryStream();
-        byte[] buffer = new byte[8192];
-        while (true)
-        {
-            int count = await req.InputStream.ReadAsync(buffer.AsMemory(), token);
-            if (count == 0) break;
-            if (memory.Length + count > maximum) throw new InvalidDataException("Request body too large.");
-            memory.Write(buffer, 0, count);
-        }
-        if (memory.Length == 0) throw new InvalidDataException("Request body is empty.");
-        return JsonDocument.Parse(memory.ToArray());
-    }
-
-    private static async Task AtomicWrite(string path, string content, CancellationToken token)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        string temp = path + ".tmp";
-        await File.WriteAllTextAsync(temp, content, Encoding.UTF8, token);
-        File.Move(temp, path, true);
-    }
-
-    private static async Task Audio(HttpListenerContext c, string path, CancellationToken token)
-    {
-        byte[] audio = await File.ReadAllBytesAsync(path, token);
-        long first = 0, last = audio.LongLength - 1;
-        int status = 200;
-        string? range = c.Request.Headers["Range"];
-        if (!string.IsNullOrWhiteSpace(range) && range.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase))
-        {
             try
             {
-                string[] parts = range[6..].Split('-', 2);
-                if (parts[0].Length == 0) first = Math.Max(0, audio.LongLength - long.Parse(parts[1]));
-                else { first = long.Parse(parts[0]); if (parts[1].Length > 0) last = Math.Min(last, long.Parse(parts[1])); }
-                if (first < 0 || first > last || first >= audio.LongLength) throw new FormatException();
-                status = 206;
+                using var response = await client.GetAsync(BaseUrl + "api/health");
+                if (response.IsSuccessStatusCode)
+                {
+                    string body = await response.Content.ReadAsStringAsync();
+                    if (body.Contains("neon-web-python", StringComparison.Ordinal))
+                        return;
+                }
             }
-            catch { c.Response.StatusCode = 416; c.Response.AddHeader("Content-Range", $"bytes */{audio.LongLength}"); c.Response.Close(); return; }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+            {
+                lastError = ex;
+            }
+            await Task.Delay(250);
         }
-        int length = checked((int)(last - first + 1));
-        c.Response.StatusCode = status; c.Response.ContentType = "audio/mpeg"; c.Response.ContentLength64 = length;
-        c.Response.AddHeader("Accept-Ranges", "bytes");
-        if (status == 206) c.Response.AddHeader("Content-Range", $"bytes {first}-{last}/{audio.LongLength}");
-        await c.Response.OutputStream.WriteAsync(audio.AsMemory(checked((int)first), length), token);
-        c.Response.Close();
+
+        string detail = ReadLogTail(logPath);
+        throw new TimeoutException(
+            "The Python game backend did not become ready within 30 seconds. " +
+            (lastError?.Message ?? "") + " " + detail);
     }
 
-    private static async Task Text(HttpListenerContext c, string value, string type, int status, CancellationToken token)
+    private static string ReadLogTail(string path)
     {
-        byte[] bytes = Encoding.UTF8.GetBytes(value);
-        c.Response.StatusCode = status; c.Response.ContentType = type + "; charset=utf-8";
-        c.Response.ContentLength64 = bytes.Length; c.Response.Headers["Cache-Control"] = "no-store";
-        c.Response.Headers["X-Content-Type-Options"] = "nosniff";
-        if (c.Request.HttpMethod != "HEAD") await c.Response.OutputStream.WriteAsync(bytes.AsMemory(), token);
-        c.Response.Close();
+        try
+        {
+            if (!File.Exists(path)) return "Python server log has not been created.";
+            var lines = File.ReadAllLines(path);
+            return string.Join(Environment.NewLine, lines.TakeLast(18));
+        }
+        catch { return "Could not read the Python server log."; }
     }
-
-    private static async Task Bytes(HttpListenerContext c, byte[] bytes, string type, int status, CancellationToken token)
-    {
-        c.Response.StatusCode = status; c.Response.ContentType = type; c.Response.ContentLength64 = bytes.LongLength;
-        c.Response.Headers["X-Content-Type-Options"] = "nosniff";
-        await c.Response.OutputStream.WriteAsync(bytes.AsMemory(), token);
-        c.Response.Close();
-    }
-
-    private static string TypeOf(string path) => Path.GetExtension(path).ToLowerInvariant() switch
-    {
-        ".html" => "text/html; charset=utf-8", ".js" => "application/javascript; charset=utf-8",
-        ".css" => "text/css; charset=utf-8", ".json" => "application/json; charset=utf-8",
-        ".svg" => "image/svg+xml", ".png" => "image/png", ".jpg" or ".jpeg" => "image/jpeg",
-        ".webp" => "image/webp", ".mp3" => "audio/mpeg", ".woff2" => "font/woff2",
-        _ => "application/octet-stream"
-    };
-
-    private static void QuietClose(HttpListenerContext c) { try { c.Response.Close(); } catch { } }
 
     public void Dispose()
     {
-        _stop.Cancel();
-        try { if (_listener.IsListening) _listener.Stop(); } catch { }
-        _listener.Close();
-        _storage.Dispose();
-        _stop.Dispose();
+        if (_disposed) return;
+        _disposed = true;
+        try
+        {
+            if (_process is { HasExited: false })
+            {
+                _process.Kill(entireProcessTree: true);
+                _process.WaitForExit(5000);
+            }
+        }
+        catch (Exception ex) { CrashLog.Write("Could not stop Python game backend", ex); }
+        finally
+        {
+            _process?.Dispose();
+            _process = null;
+        }
     }
+}
 
-    private sealed class Score
+internal static class DesktopPaths
+{
+    public static string DataDirectory
     {
-        public string n { get; set; } = "Player";
-        public long s { get; set; }
+        get
+        {
+            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string path = Path.Combine(string.IsNullOrWhiteSpace(local)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+                : local, "NeonSwarm");
+            Directory.CreateDirectory(path);
+            return path;
+        }
     }
 }
 

@@ -6,6 +6,8 @@ on:
     paths-ignore:
       - "EXE_APP/dist/**"
       - "Build_and_use_game.exe"
+  pull_request:
+    branches: ["main", "feature/neon-swarm-expansion-2026"]
   workflow_dispatch:
 
 concurrency:
@@ -30,6 +32,13 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+
+      - name: Set up Python 3.12 for the embedded game server
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: EXE_APP/PythonHost/requirements.txt
 
       - name: Verify SDK
         working-directory: EXE_APP
@@ -59,10 +68,39 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Publish failed: $project" }
           }
 
+      - name: Install Python host dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r EXE_APP/PythonHost/requirements.txt
+
+      - name: Validate Python and game JavaScript syntax
+        shell: pwsh
+        run: |
+          python -m py_compile neon_swarm.py auth.py
+          $scripts = @("neon_swarm_features.js","neon_swarm_expansion.js","neon_swarm_apex.js","neon_swarm_ultimate.js","neon_swarm_round2.js","public/neon_swarm_ultimate.js","public/neon_swarm_round2.js")
+          foreach ($script in $scripts) {
+            node --check $script
+            if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $script" }
+          }
+
+      - name: Package the Python HTTP server as neon_web_python.exe
+        shell: pwsh
+        run: |
+          $assets = @("neon_swarm_features.js","neon_swarm_expansion.js","neon_swarm_apex.js","neon_swarm_ultimate.js","neon_swarm_round2.js","Raya(Slowed).mp3")
+          $pyInstallerArgs = @("-m","PyInstaller","--noconfirm","--clean","--onefile","--windowed","--name","neon_web_python","--distpath","EXE_APP/dist/Neon_Swarm","--workpath","EXE_APP/dist/python-work","--specpath","EXE_APP/dist/python-spec","--collect-all","cryptography","--hidden-import","auth")
+          foreach ($asset in $assets) {
+            if (-not (Test-Path $asset)) { throw "Missing Python host asset: $asset" }
+            $pyInstallerArgs += @("--add-data","$asset;.")
+          }
+          $pyInstallerArgs += "neon_swarm.py"
+          python @pyInstallerArgs
+          if ($LASTEXITCODE -ne 0) { throw "neon_web_python.exe packaging failed." }
+          if (-not (Test-Path "EXE_APP/dist/Neon_Swarm/neon_web_python.exe")) { throw "neon_web_python.exe was not produced." }
+
       - name: Smoke-test local game host and files
         run: |
           $p = "EXE_APP/dist/Neon_Swarm"
-          $required = @("$p/Neon_Swarm.exe","$p/Neon_Swarm_Crash_Handler.exe","$p/Neon_Swarm.dll","$p/Neon_Swarm_Pick.exe","$p/Neon_Swarm_Pick.dll","$p/Admin_Panel.exe","$p/Admin_Panel.dll","$p/Neon_Swarm_Update_Checker_Background.exe","$p/Neon_Swarm_Update_Checker_Background.dll","$p/Neon_Swarm_Webview2_Background.exe","$p/Neon_Swarm_Webview2_Background.dll","$p/Game/index.html","$p/Game/neon_swarm_features.js","$p/Game/neon_swarm_expansion.js","$p/Game/neon_swarm_apex.js","$p/Game/Raya(Slowed).mp3")
+          $required = @("$p/Neon_Swarm.exe","$p/Neon_Swarm_Crash_Handler.exe","$p/Neon_Swarm.dll","$p/Neon_Swarm_Pick.exe","$p/Neon_Swarm_Pick.dll","$p/Admin_Panel.exe","$p/Admin_Panel.dll","$p/Neon_Swarm_Update_Checker_Background.exe","$p/Neon_Swarm_Update_Checker_Background.dll","$p/Neon_Swarm_Webview2_Background.exe","$p/Neon_Swarm_Webview2_Background.dll","$p/neon_web_python.exe","$p/Game/index.html","$p/Game/neon_swarm_features.js","$p/Game/neon_swarm_expansion.js","$p/Game/neon_swarm_apex.js","$p/Game/neon_swarm_ultimate.js","$p/Game/neon_swarm_round2.js","$p/Game/Raya(Slowed).mp3")
           foreach ($f in $required) { if (-not (Test-Path $f)) { throw "Missing build output: $f" } }
           $smoke = Start-Process -FilePath "$p/Neon_Swarm.exe" -ArgumentList @("--server-smoke-test") -WorkingDirectory (Resolve-Path $p).Path -Wait -PassThru -WindowStyle Hidden
           if ($smoke.ExitCode -ne 0) {
