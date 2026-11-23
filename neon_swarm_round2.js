@@ -109,11 +109,11 @@ function completeMission(mission){
   S.campaign.active=null;reward(350+missions.findIndex(x=>x.id===mission.id)*150);
   if(mission.id==='signal'&&!S.drones.includes('scout'))S.drones.push('scout');
   save();
-  openDialog('MISSION COMPLETE · '+mission.title,[mission.done,'Command has transferred your mission reward.'],()=>{if(Game.state==='pause')Game.goMenu();render()});
+  openDialog('MISSION COMPLETE · '+mission.title,[mission.done,'Command has transferred your mission reward.'],()=>{if(Game.state==='pause'||Game.state==='over')Game.goMenu();render()});
 }
 function startMission(mission){
   S.campaign.active=mission.id;pendingRun={kind:'story',mission:mission};save();
-  Game.start();pendingRun=null;Game.wave=mission.wave;Game.enemies=[];Game.bullets=[];Game.eb=[];Game.betweenWaves=false;Game.spawnWave();
+  Game.start();pendingRun=null;
   openDialog(mission.title,mission.lines,()=>{if(Game.state==='pause')Game.resume()});render();
 }
 function activeMission(){return missions.find(x=>x.id===S.campaign.active)||null}
@@ -171,19 +171,32 @@ function seasonRewards(){
 }
 function startCustom(index){
   const challenge=S.customs[index];if(!challenge)return;
-  pendingRun={kind:'custom',challenge:challenge};Game.start();pendingRun=null;
-  Game.wave=challenge.wave;Game.enemies=[];Game.betweenWaves=false;generateMap(challenge.seed);Game.spawnWave();render();
+  generateMap(challenge.seed);pendingRun={kind:'custom',challenge:challenge};Game.start();pendingRun=null;render();
 }
 function replayOverlay(replay){
   if(!replay)return;
   activeTab='replay';render();
   const content=$('ns2-content');if(!content)return;
-  content.innerHTML='<div class="ns2-card"><strong>REPLAY THEATER</strong><p>Scrub the captured flight path, change playback speed and choose the camera.</p><input id="ns2-replay-range" type="range" min="0" max="'+Math.max(0,replay.frames.length-1)+'" value="0"><div class="ns2-row"><button data-action="replay-play">PLAY</button><button data-action="replay-stop">PAUSE</button><select id="ns2-replay-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select><select id="ns2-replay-camera"><option value="follow">Follow pilot</option><option value="overview">Overview</option></select></div><p id="ns2-replay-meta"></p></div>';
-  $('ns2-replay-range').oninput=(e)=>{replayIndex=Number(e.target.value);drawOverlay()};
+  content.innerHTML='<div class="ns2-card"><strong>REPLAY THEATER</strong><p>Scrub the captured flight path, change playback speed and choose the camera.</p><canvas id="ns2-replay-canvas" width="960" height="420" style="display:block;width:100%;height:auto;max-height:42vh;background:#040617;border:1px solid #42dff766;border-radius:10px"></canvas><input id="ns2-replay-range" type="range" min="0" max="'+Math.max(0,replay.frames.length-1)+'" value="0"><div class="ns2-row"><button data-action="replay-play">PLAY</button><button data-action="replay-stop">PAUSE</button><select id="ns2-replay-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select><select id="ns2-replay-camera"><option value="follow">Follow pilot</option><option value="overview">Overview</option></select></div><p id="ns2-replay-meta"></p></div>';
+  $('ns2-replay-range').oninput=(e)=>{replayIndex=Number(e.target.value);drawReplayPreview();drawOverlay()};
   $('ns2-replay-speed').onchange=(e)=>{replaySpeed=Number(e.target.value)||1};
   $('ns2-replay-camera').onchange=(e)=>{replayCamera=e.target.value;drawOverlay()};
   $('ns2-replay-meta').textContent='Score '+replay.score+' · Wave '+replay.wave+' · '+replay.frames.length+' frames';
-  window._neonRound2Replay=replay;
+  window._neonRound2Replay=replay;drawReplayPreview();
+}
+function drawReplayPreview(){
+  const canvas=$('ns2-replay-canvas'),replay=window._neonRound2Replay;if(!canvas||!replay)return;
+  const c=canvas.getContext('2d'),w=canvas.width,h=canvas.height;
+  c.fillStyle='#040617';c.fillRect(0,0,w,h);
+  for(let x=0;x<w;x+=48){c.strokeStyle='#17264a';c.beginPath();c.moveTo(x,0);c.lineTo(x,h);c.stroke()}
+  for(let y=0;y<h;y+=48){c.strokeStyle='#17264a';c.beginPath();c.moveTo(0,y);c.lineTo(w,y);c.stroke()}
+  const start=Math.max(0,Math.floor(replayIndex)-32),end=Math.min(replay.frames.length,Math.floor(replayIndex)+1);
+  c.beginPath();for(let i=start;i<end;i++){const f=replay.frames[i],x=f.x*w,y=f.y*h;if(i===start)c.moveTo(x,y);else c.lineTo(x,y)}
+  c.strokeStyle='#48eaff';c.lineWidth=3;c.stroke();
+  const f=replay.frames[Math.max(0,Math.min(replay.frames.length-1,Math.floor(replayIndex)))];if(!f)return;
+  c.beginPath();c.arc(f.x*w,f.y*h,11,0,Math.PI*2);c.fillStyle='#fff';c.shadowBlur=18;c.shadowColor='#45eaff';c.fill();c.shadowBlur=0;
+  f.enemies.forEach(e=>{c.beginPath();c.arc(e.x*w,e.y*h,e.k==='boss'?15:6,0,Math.PI*2);c.fillStyle=e.mutation?'#ffae52':'#ff409c';c.fill()});
+  c.fillStyle='#fff';c.font='bold 15px system-ui';c.fillText('WAVE '+f.wave+'  ·  SCORE '+f.score+'  ·  HULL '+Math.round(f.hp),18,26);
 }
 function marketHeaders(){return marketToken?{'Content-Type':'application/json','X-Market-Token':marketToken}:{'Content-Type':'application/json'}}
 async function ensureMarketSession(){
@@ -295,9 +308,9 @@ function css(){
     '#ns2-panel .ns2-progress{height:7px;background:#ffffff16;border-radius:99px;overflow:hidden;margin:8px 0}#ns2-panel .ns2-progress i{display:block;height:100%;background:linear-gradient(90deg,#37dff5,#b36dff)}',
     '#ns2-dialog{position:fixed;inset:0;z-index:2400;display:none;align-items:flex-end;justify-content:center;padding:5vh 14px;background:linear-gradient(180deg,#03051411,#030514dd)}#ns2-dialog.open{display:flex}',
     '#ns2-dialog .ns2-dialog-box{width:min(800px,96vw);padding:22px;border:1px solid #42dff7aa;border-radius:16px;background:linear-gradient(145deg,#10172e,#21103b);box-shadow:0 0 50px #42dff733}',
-    '#ns2-dialog-tag{color:#42e5ff;letter-spacing:.2em;font-size:10px;font-weight:900}#ns2-dialog .ns2-dialog-title{margin:8px 0;color:#fff;font-size:clamp(22px,4vw,34px);font-weight:900}',
+    '.ns2-dialog-tag{color:#42e5ff;letter-spacing:.2em;font-size:10px;font-weight:900}#ns2-dialog .ns2-dialog-title{margin:8px 0;color:#fff;font-size:clamp(22px,4vw,34px);font-weight:900}',
     '#ns2-dialog .ns2-dialog-text{min-height:58px;color:#d8dcf5;font-size:17px;line-height:1.6}#ns2-dialog .ns2-dialog-actions{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:18px;color:#a9b8d5;font-size:11px}',
-    '#ns2-world-layer{position:fixed;inset:0;z-index:6;pointer-events:none;width:100%;height:100%}',
+    '#ns2-world-layer{position:fixed;inset:0;z-index:4;pointer-events:none;width:100%;height:100%}#ns2-panel,#ns2-dialog{z-index:2400} .panel{z-index:10}',
     '@media(max-width:560px){#ns2-panel .ns2-shell{padding:12px}#ns2-panel .ns2-grid{grid-template-columns:1fr}#ns2-dialog .ns2-dialog-box{padding:16px}}'
   ].join('');
   document.head.append(s);
@@ -337,20 +350,20 @@ function render(){
   let html='';
   if(activeTab==='story'){
     html='<p>Follow the five-mission campaign. Each mission has story transmissions, a dedicated wave and a finale against the Heart of the Swarm.</p><div class="ns2-grid">';
-    missions.forEach((m,i)=>{const done=S.campaign.completed.includes(m.id),unlocked=i<=S.campaign.unlocked;html+=card(m.title,m.subtitle+' · Wave '+m.wave,done?'noop':'mission',done?'COMPLETED':unlocked?'START':'LOCKED',done||!unlocked)});
+    missions.forEach((m,i)=>{const done=S.campaign.completed.includes(m.id),unlocked=i<=S.campaign.unlocked;html+=card(m.title,m.subtitle+' · Wave '+m.wave,done?'noop':'mission',m.id,done||!unlocked,done?'COMPLETED':unlocked?'START':'LOCKED')});
     html+='</div><div class="ns2-note">The final mission uses the existing wave-60 boss encounter as the campaign finale.</div>';
   }else if(activeTab==='map'){
     ensureMap();html='<p>Every sortie gets a generated environment, collision obstacles, hidden passages and searchable vault caches.</p><div class="ns2-card"><strong>'+safe(S.map.theme)+'</strong><small>Seed '+S.map.seed+' · '+S.map.obstacles.length+' obstacles · '+S.map.secrets.length+' hidden caches · '+S.map.found.length+' discovered</small><div class="ns2-row"><button data-action="new-map">GENERATE NEW MAP</button><button data-action="reveal-map">SCAN SECRETS</button></div></div>';
     html+='<div class="ns2-grid">'+card('Secret caches','Hidden caches reward crystals and a tradeable vault relic.','reveal-map','SCAN')+card('Environment','Current sector: '+S.map.theme,'new-map','REGENERATE')+'</div>';
   }else if(activeTab==='drones'){
     html='<p>Unlocked drones orbit your ship and act automatically during runs. The Scout is granted after Mission 01.</p><div class="ns2-grid">';
-    [['scout','Scout Drone','Attacks nearby enemies and pulls in nearby XP shards',0],['medic','Medic Drone','Restores 18 hull every 8 seconds',18],['striker','Striker Drone','Deals heavy autonomous damage',30],['guardian','Guardian Drone','Intercepts close enemies and protects your hull',24]].forEach(d=>{const owns=S.drones.includes(d[0]);html+=card(d[1],d[2],owns?'noop':'drone',owns?'UNLOCKED':'UNLOCK · '+d[3]+' CRYSTALS',owns||S.materials.crystal<d[3])});
+    [['scout','Scout Drone','Attacks nearby enemies and pulls in nearby XP shards',0],['medic','Medic Drone','Restores 18 hull every 8 seconds',18],['striker','Striker Drone','Deals heavy autonomous damage',30],['guardian','Guardian Drone','Intercepts close enemies and protects your hull',24]].forEach(d=>{const owns=S.drones.includes(d[0]);html+=card(d[1],d[2],owns?'noop':'drone',d[0],owns||S.materials.crystal<d[3],owns?'UNLOCKED':'UNLOCK · '+d[3]+' CRYSTALS')});
     html+='</div><p>Active companions: '+(S.drones.length?S.drones.join(', '):'none')+'</p>';
   }else if(activeTab==='craft'){
     html='<p>Battle drops and secret caches supply components. Crafting permanently modifies your pilot build.</p><div class="ns2-card"><strong>Materials</strong><small>Scrap '+S.materials.scrap+' · Crystals '+S.materials.crystal+' · Core fragments '+S.materials.core+'</small></div><div class="ns2-grid">';
-    html+=card('Overcharge barrel','+12% weapon damage per rank · Cost 8 scrap + 2 crystals','craft','damage',S.materials.scrap<8||S.materials.crystal<2||S.mods.damage>=5);
-    html+=card('Aegis plating','-8% incoming contact damage per rank · Cost 10 scrap + 3 crystals','craft','armor',S.materials.scrap<10||S.materials.crystal<3||S.mods.armor>=5);
-    html+=card('Ion capacitor','+7% drone / shot cadence per rank · Cost 12 scrap + 1 core','craft','rate',S.materials.scrap<12||S.materials.core<1||S.mods.rate>=5);
+    html+=card('Overcharge barrel','+12% weapon damage per rank · Cost 8 scrap + 2 crystals','craft','damage',S.materials.scrap<8||S.materials.crystal<2||S.mods.damage>=5,'CRAFT');
+    html+=card('Aegis plating','-8% incoming contact damage per rank · Cost 10 scrap + 3 crystals','craft','armor',S.materials.scrap<10||S.materials.crystal<3||S.mods.armor>=5,'CRAFT');
+    html+=card('Ion capacitor','+7% drone / shot cadence per rank · Cost 12 scrap + 1 core','craft','rate',S.materials.scrap<12||S.materials.core<1||S.mods.rate>=5,'CRAFT');
     html+='</div><p>Ranks: damage '+S.mods.damage+' · armour '+S.mods.armor+' · cadence '+S.mods.rate+'</p>';
   }else if(activeTab==='mutations'){
     html='<p>From wave 6 onward, some enemies evolve mid-battle. Mutation traits change health, armour, movement and death behaviour.</p><div class="ns2-grid">';
@@ -358,22 +371,22 @@ function render(){
     html+='</div><div class="ns2-note">Mutated enemies encountered: '+S.mutations.seen+'. Higher waves increase mutation frequency.</div>';
   }else if(activeTab==='market'){
     html='<p>Server-managed player listings for equipment, skins and collectibles. The marketplace is available when this game is connected to a running Neon Swarm Python backend.</p><div class="ns2-row"><button data-action="market-refresh">REFRESH MARKET</button></div><div class="ns2-grid">';
-    S.tradeInventory.forEach((it,i)=>{html+=card(it.name,it.rarity+' · '+it.kind,'market-list',String(i),false)});
+    S.tradeInventory.forEach((it,i)=>{html+=card(it.name,it.rarity+' · '+it.kind,'market-list',String(i),false,'LIST ITEM')});
     if(!S.tradeInventory.length)html+='<div class="ns2-card"><strong>No tradeable items yet</strong><small>Find secret caches or defeat bosses to earn collectibles.</small></div>';
     (marketRows||[]).forEach(x=>{html+='<div class="ns2-card"><strong>'+safe(x.item.name)+'</strong><small>'+safe(x.item.rarity)+' · Seller '+safe(x.seller)+' · '+x.price+' credits</small><button data-action="market-buy" data-value="'+safe(x.id)+'" '+(x.mine?'disabled':'')+'>'+(x.mine?'YOUR LISTING':'BUY')+'</button></div>'});
     html+='</div>';
   }else if(activeTab==='pass'){
     html='<p>Season '+safe(S.season.id)+' · Earn XP by eliminating enemies and bosses. Every tier is earned through play; the bonus track is premium-style, not a payment gate.</p><div class="ns2-card"><strong>Season progress · '+S.season.xp+' XP</strong><div class="ns2-progress"><i style="width:'+Math.min(100,S.season.xp/12)+'%"></i></div></div><div class="ns2-grid">';
-    seasonRewards().forEach((r,i)=>{const claimed=S.season.claimed.includes(i),ready=S.season.xp>=r.xp;html+=card((r.premium?'BONUS TRACK · ':'FREE TRACK · ')+r.label,'Tier '+(i+1)+' · '+r.xp+' XP',claimed?'noop':'pass-claim',claimed?'CLAIMED':ready?'CLAIM':'LOCKED',claimed||!ready)});
+    seasonRewards().forEach((r,i)=>{const claimed=S.season.claimed.includes(i),ready=S.season.xp>=r.xp;html+=card((r.premium?'BONUS TRACK · ':'FREE TRACK · ')+r.label,'Tier '+(i+1)+' · '+r.xp+' XP',claimed?'noop':'pass-claim',String(i),claimed||!ready,claimed?'CLAIMED':ready?'CLAIM':'LOCKED')});
     html+='</div>';
   }else if(activeTab==='replay'){
     html='<p>Saved sorties include the pilot path, enemy positions, score and wave. Scrub the timeline, switch camera mode and play at half, normal, double or quadruple speed.</p><div class="ns2-grid">';
-    S.replays.forEach((r,i)=>{html+=card(new Date(r.date).toLocaleString(),'Score '+r.score+' · Wave '+r.wave+' · '+r.frames.length+' snapshots','replay-open',String(i))});
+    S.replays.forEach((r,i)=>{html+=card(new Date(r.date).toLocaleString(),'Score '+r.score+' · Wave '+r.wave+' · '+r.frames.length+' snapshots','replay-open',String(i),false,'WATCH REPLAY')});
     if(!S.replays.length)html+='<div class="ns2-card"><strong>No replays saved</strong><small>Complete or quit a run to save its flight recorder data.</small></div>';
     html+='</div>';
   }else if(activeTab==='creator'){
     html='<p>Build a custom challenge with a chosen starting wave, environment seed and enemy density. Challenges are saved on this device and can be replayed.</p><div class="ns2-card"><div class="ns2-row"><label>Starting wave <input id="ns2-custom-wave" type="number" min="1" max="60" value="10"></label><label>Enemy density <select id="ns2-custom-density"><option value="1">Normal</option><option value="1.5">High</option><option value="2">Extreme</option></select></label></div><div class="ns2-row"><label>Map seed <input id="ns2-custom-seed" type="number" value="'+Math.floor(Math.random()*999999)+'"></label><button data-action="custom-save">SAVE CHALLENGE</button></div></div><div class="ns2-grid">';
-    S.customs.forEach((x,i)=>{html+=card(x.name,'Wave '+x.wave+' · density '+x.density+' · seed '+x.seed,'custom-play',String(i))});
+    S.customs.forEach((x,i)=>{html+=card(x.name,'Wave '+x.wave+' · density '+x.density+' · seed '+x.seed,'custom-play',String(i),false,'PLAY CHALLENGE')});
     html+='</div>';
   }else if(activeTab==='events'){
     const ev=eventInfo&&eventInfo.event;
@@ -397,9 +410,9 @@ async function runAction(action,value){
   else if(action==='reveal-map'){if(!S.map.found.length&&S.map.secrets.length){const i=S.map.secrets.findIndex((x,n)=>!S.map.found.includes(n));if(i>=0){S.map.found.push(i);S.materials.crystal+=2;shout('SCANNER FOUND A CACHE','#ffc34d')}}save();render()}
   else if(action==='drone'){const costs={scout:0,medic:18,striker:30,guardian:24},cost=costs[value];if(S.materials.crystal>=cost&&!S.drones.includes(value)){S.materials.crystal-=cost;S.drones.push(value);save();render()}}
   else if(action==='craft'){const costs={damage:[8,2,0],armor:[10,3,0],rate:[12,0,1]},c=costs[value];if(c&&S.materials.scrap>=c[0]&&S.materials.crystal>=c[1]&&S.materials.core>=c[2]){S.materials.scrap-=c[0];S.materials.crystal-=c[1];S.materials.core-=c[2];S.mods[value]++;save();render();shout('CRAFT COMPLETE','#6dffb0')}}
-  else if(action==='pass-claim'){const i=seasonRewards().findIndex((r,n)=>r.label===value||String(n)===value);const index=Number(value);if(Number.isInteger(index)&&seasonRewards()[index]&&S.season.xp>=seasonRewards()[index].xp&&!S.season.claimed.includes(index)){const r=seasonRewards()[index];S.season.claimed.push(index);if(r.amount)reward(r.amount);else S.tradeInventory.push({id:'season-'+Date.now(),name:r.label,rarity:'EPIC',kind:'cosmetic'});save();render()}}
+  else if(action==='pass-claim'){const index=Number(value);if(Number.isInteger(index)&&seasonRewards()[index]&&S.season.xp>=seasonRewards()[index].xp&&!S.season.claimed.includes(index)){const r=seasonRewards()[index];S.season.claimed.push(index);if(r.amount)reward(r.amount);else S.tradeInventory.push({id:'season-'+Date.now(),name:r.label,rarity:'EPIC',kind:'cosmetic'});save();render()}}
   else if(action==='replay-open')replayOverlay(S.replays[Number(value)])
-  else if(action==='replay-play'){if(replayTimer)clearInterval(replayTimer);replayTimer=setInterval(()=>{const r=window._neonRound2Replay;if(!r){clearInterval(replayTimer);return}replayIndex=(replayIndex+replaySpeed)%r.frames.length;if($('ns2-replay-range'))$('ns2-replay-range').value=String(Math.floor(replayIndex));drawOverlay()},100)}
+  else if(action==='replay-play'){if(replayTimer)clearInterval(replayTimer);replayTimer=setInterval(()=>{const r=window._neonRound2Replay;if(!r){clearInterval(replayTimer);return}replayIndex=(replayIndex+replaySpeed)%r.frames.length;if($('ns2-replay-range'))$('ns2-replay-range').value=String(Math.floor(replayIndex));drawReplayPreview();drawOverlay()},100)}
   else if(action==='replay-stop'){if(replayTimer)clearInterval(replayTimer);replayTimer=null}
   else if(action==='custom-save'){const wave=Math.max(1,Math.min(60,Number($('ns2-custom-wave').value)||10)),density=Number($('ns2-custom-density').value)||1,seed=Math.max(1,Number($('ns2-custom-seed').value)||1);S.customs.unshift({name:'Custom challenge '+(S.customs.length+1),wave,density,seed});S.customs=S.customs.slice(0,10);save();render()}
   else if(action==='custom-play')startCustom(Number(value))
