@@ -183,6 +183,9 @@ input:focus{border-color:var(--cyan)}
 <script>
 'use strict';
 /* ================= CONFIG & HELPERS ================= */
+const desktopQuery=new URLSearchParams(location.search);
+const DesktopRenderOptions={resolution:desktopQuery.get('resolution')||'720p',targetHeight:Math.max(144,Math.min(2160,Number(desktopQuery.get('targetHeight'))||720)),vfx:desktopQuery.get('vfx')!=='off',animations:desktopQuery.get('animations')!=='off'};
+if(DesktopRenderOptions.targetHeight<=480)document.documentElement.classList.add('render-pixelated');
 const VIEW=560,TAU=Math.PI*2,FONT='"Syne","Trebuchet MS",system-ui,sans-serif'; // VIEW = logical units on the short screen side
 const COL={cyan:'#3df5ff',pink:'#ff3d9a',gold:'#ffc23d',vio:'#9b5cff',mint:'#6dffb0'};
 const MAX_WAVE=60;
@@ -308,17 +311,17 @@ const Admin={password:'12345678',key:'neonswarm.admin',config:{fireRate:10,damag
 
 /* ================= FX: particles, rings, floating text, shake ================= */
 const FX={parts:[],texts:[],rings:[],shake:0,flash:0,
-  burst(x,y,col,n,spd,life,size){if(this.parts.length>700)return;for(let i=0;i<n;i++){const a=rnd(0,TAU),s=rnd(.2,1)*spd;this.parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:life*rnd(.5,1),max:life,size:size*rnd(.6,1.4),col})}},
-  text(x,y,s,col,size){this.texts.push({x,y,s,col,size,life:.9,max:.9})},
-  ring(x,y,max,col){this.rings.push({x,y,r:4,max,col,life:.5,max_t:.5})},
-  hit(m){this.shake=Math.max(this.shake,reduce?m*.4:m)},
-  update(dt){const f=Math.pow(.02,dt);
+  burst(x,y,col,n,spd,life,size){if(!DesktopRenderOptions.vfx||!DesktopRenderOptions.animations||this.parts.length>700)return;for(let i=0;i<n;i++){const a=rnd(0,TAU),s=rnd(.2,1)*spd;this.parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:life*rnd(.5,1),max:life,size:size*rnd(.6,1.4),col})}},
+  text(x,y,s,col,size){if(!DesktopRenderOptions.vfx||!DesktopRenderOptions.animations)return;this.texts.push({x,y,s,col,size,life:.9,max:.9})},
+  ring(x,y,max,col){if(!DesktopRenderOptions.vfx||!DesktopRenderOptions.animations)return;this.rings.push({x,y,r:4,max,col,life:.5,max_t:.5})},
+  hit(m){if(DesktopRenderOptions.vfx&&DesktopRenderOptions.animations)this.shake=Math.max(this.shake,reduce?m*.4:m)},
+  update(dt){if(!DesktopRenderOptions.animations){this.parts.length=0;this.texts.length=0;this.rings.length=0;this.shake=0;this.flash=0;return}const f=Math.pow(.02,dt);
     for(const p of this.parts){p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=f;p.vy*=f}
     for(const t of this.texts){t.life-=dt;t.y-=45*dt}
     for(const r of this.rings){r.life-=dt;r.r+=(r.max-r.r)*Math.min(1,dt*7)}
     this.parts=this.parts.filter(p=>p.life>0);this.texts=this.texts.filter(t=>t.life>0);this.rings=this.rings.filter(r=>r.life>0);
     this.shake=Math.max(0,this.shake-dt*40);this.flash=Math.max(0,this.flash-dt*2.2)},
-  draw(c,S){c.shadowBlur=0;c.globalCompositeOperation='lighter'; // additive blending = glow
+  draw(c,S){if(!DesktopRenderOptions.vfx||!DesktopRenderOptions.animations){c.globalAlpha=1;c.shadowBlur=0;c.globalCompositeOperation='source-over';return}c.shadowBlur=0;c.globalCompositeOperation='lighter'; // additive blending = glow
     for(const p of this.parts){const a=p.life/p.max;c.globalAlpha=a;c.fillStyle=p.col;c.beginPath();c.arc(p.x,p.y,p.size*(.4+a*.6),0,TAU);c.fill()}
     c.lineWidth=3;for(const r of this.rings){c.globalAlpha=r.life/r.max_t;c.strokeStyle=r.col;c.beginPath();c.arc(r.x,r.y,r.r,0,TAU);c.stroke()}
     c.globalCompositeOperation='source-over';c.textAlign='center';
@@ -552,7 +555,7 @@ function draw(){
 }
 
 /* ================= BOOT: resize + delta-time loop ================= */
-function resize(){const cw=cv.clientWidth||innerWidth,ch=cv.clientHeight||innerHeight,dpr=Math.min(devicePixelRatio||1,2),s=Math.min(cw,ch)/VIEW;
+function resize(){const cw=cv.clientWidth||innerWidth,ch=cv.clientHeight||innerHeight,dpr=clamp((DesktopRenderOptions.targetHeight/Math.max(1,ch))*(devicePixelRatio||1),.25,4),s=Math.min(cw,ch)/VIEW;
   cv.width=Math.round(cw*dpr);cv.height=Math.round(ch*dpr);view={cw,ch,dpr,s,w:cw/s,h:ch/s};
   bg=ctx.createRadialGradient(cv.width/2,cv.height/2,0,cv.width/2,cv.height/2,Math.max(cv.width,cv.height)*.7);bg.addColorStop(0,'#220c52');bg.addColorStop(1,'#07021a');
   const p=Game.p;if(p){p.x=clamp(p.x,p.r,view.w-p.r);p.y=clamp(p.y,p.r,view.h-p.r)}}
@@ -622,6 +625,24 @@ $('import-progress-button').onclick=()=>$('import-progress').click();
 $('import-progress').onchange=event=>SaveTransfer.import(event.target.files&&event.target.files[0]);
 $('restart-run').onclick=()=>{if(window.confirm('Restart this run and reset the current score?'))Game.start()};
 
+window.NeonSwarmDesktopAdmin={
+ handle(request){
+  if(!request||typeof request.op!=='string')return {ok:false,message:'Invalid admin request.'};
+  if(request.op==='status')return {ok:true,state:Game.state,wave:Game.wave,score:Game.score,unlocked:Admin.unlocked};
+  if(request.op==='unlock'){if(String(request.password||'')!==Admin.password)return {ok:false,message:'Incorrect admin password.'};Admin.unlocked=true;Admin.render();if(Game.p)Game.refreshMultiplier();return {ok:true,message:'Admin access unlocked for this game session.'};}
+  if(!Admin.unlocked)return {ok:false,message:'Unlock the Admin Panel first.'};
+  const value=Number(request.value);
+  switch(request.op){
+   case 'fireRate':Admin.setFireRate(value);return {ok:true,message:'Fire rate set to '+Admin.config.fireRate+' shots/sec.'};
+   case 'damage':Admin.setDamage(value);return {ok:true,message:'Damage set to '+Admin.config.damage+'.'};
+   case 'xpMultiplier':Admin.setXpMultiplier(value);return {ok:true,message:'XP multiplier set to '+Admin.config.xpMultiplier+'x.'};
+   case 'shieldDuration':Admin.setShieldDuration(value);return {ok:true,message:'Shield duration set to '+Admin.config.shieldDuration+' seconds.'};
+   case 'grantShield':Admin.grantShield();return {ok:true,message:Game.p?'Shield granted.':'Shield queued for the next run.'};
+   case 'openGameAdmin':Admin.open(Game.state==='play'?'pause':'menu');return {ok:true,message:'Opened the in-game Admin Commands panel.'};
+   default:return {ok:false,message:'Unknown command.'};
+  }
+ }
+};
 window.NeonSwarmCore={Game,Profile,Settings,Input,FX,Sfx,TYPES,PAT,BOSS_HP,MAX_WAVE,getView:()=>view,canvas:cv,savedData:typeof SavedData==='undefined'?null:SavedData};
 const Net={on:false, // optional Python leaderboard: only present when served by neon_swarm.py
   async get(){try{const r=await fetch('api/scores');if(!r.ok)throw 0;const j=await r.json();this.on=true;return j.scores}catch(e){this.on=false;return null}},
