@@ -1119,7 +1119,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
           try:
             scripts = []
-            for filename in ("neon_swarm_features.js", "neon_swarm_expansion.js", "neon_swarm_apex.js"):
+            for filename in ("neon_swarm_features.js", "neon_swarm_expansion.js", "neon_swarm_apex.js", "neon_swarm_ultimate.js"):
               script_path = Path(__file__).resolve().with_name(filename)
               scripts.append(script_path.read_text(encoding="utf-8"))
           except OSError:
@@ -1130,7 +1130,7 @@ class Handler(BaseHTTPRequestHandler):
           inline_scripts = "\n".join("<script>\n" + script + "\n</script>" for script in scripts)
           html = GAME_HTML.replace(feature_tag, inline_scripts)
           return self.send_body(200, html, "text/html")
-        if path in ("/neon_swarm_features.js", "/neon_swarm_expansion.js", "/neon_swarm_apex.js"):
+        if path in ("/neon_swarm_features.js", "/neon_swarm_expansion.js", "/neon_swarm_apex.js", "/neon_swarm_ultimate.js"):
           try:
             filename = path.rsplit("/", 1)[-1]
             script = Path(__file__).resolve().with_name(filename).read_text(encoding="utf-8")
