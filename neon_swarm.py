@@ -1372,13 +1372,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(401, {"error": "Create a marketplace pilot session first"})
             return self.send_json(200, {"balance": user["balance"], "deliveries": list(user["deliveries"])})
         if path in ("/", "/index.html"):
+          public_html = RESOURCE_DIR / "public" / "index.html"
           try:
+            if public_html.is_file():
+              html = public_html.read_text(encoding="utf-8")
+              html = html.replace(
+                  "https://raw.githubusercontent.com/luisdiko14-lab/Cool.game/main/Raya%28Slowed%29.mp3",
+                  "/Raya(Slowed).mp3")
+              html = html.replace(
+                  "https://raw.githubusercontent.com/luisdiko14-lab/Cool.game/main/Raya(Slowed).mp3",
+                  "/Raya(Slowed).mp3")
+              return self.send_body(200, html, "text/html")
             scripts = []
             for filename in ("neon_swarm_features.js", "neon_swarm_expansion.js", "neon_swarm_apex.js", "neon_swarm_ultimate.js", "neon_swarm_round2.js"):
               script_path = RESOURCE_DIR / filename
               scripts.append(script_path.read_text(encoding="utf-8"))
           except OSError:
-            return self.send_body(500, '{"error":"one or more game feature modules are unavailable"}')
+            return self.send_body(500, '{"error":"game HTML or one or more feature modules are unavailable"}')
           feature_tag = '<script src="/neon_swarm_features.js"></script>'
           if feature_tag not in GAME_HTML:
             return self.send_body(500, '{"error":"game feature hook is missing"}')
