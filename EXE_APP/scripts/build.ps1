@@ -74,7 +74,7 @@ try {
     $productVersion = "1.0.$buildNumber"
     & wix build -arch x64 -ext WixToolset.UI.wixext -d "PublishDir=$publish" -d "ProductVersion=$productVersion" "Installer/Msi/Package.wxs" -out $msi
     if ($LASTEXITCODE -ne 0) { throw "WiX could not create the MSI." }
-    & wix build -arch x64 -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext -d "MsiPath=$msi" -d "WebView2Installer=$runtime" "Installer/Bundle/Bundle.wxs" -out $setup
+    & wix build -arch x64 -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext -d "BundleVersion=1.0.$buildNumber.0" -d "MsiPath=$msi" -d "WebView2Installer=$runtime" "Installer/Bundle/Bundle.wxs" -out $setup
     if ($LASTEXITCODE -ne 0) { throw "WiX could not create Setup.exe." }
 
     Write-Host "[4/4] Creating the complete portable ZIP..." -ForegroundColor Cyan

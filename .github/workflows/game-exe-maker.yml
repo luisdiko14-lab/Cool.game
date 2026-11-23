@@ -116,7 +116,7 @@ jobs:
         working-directory: EXE_APP
         run: |
           $dist = (Resolve-Path dist).Path
-          wix build -arch x64 -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext -d "MsiPath=$dist/Neon_Swarm_Setup.msi" -d "WebView2Installer=$dist/MicrosoftEdgeWebView2Setup.exe" Installer/Bundle/Bundle.wxs -out dist/Neon_Swarm_Setup.exe
+          wix build -arch x64 -ext WixToolset.BootstrapperApplications.wixext -ext WixToolset.Util.wixext -d "BundleVersion=1.0.${{ github.run_number }}.0" -d "MsiPath=$dist/Neon_Swarm_Setup.msi" -d "WebView2Installer=$dist/MicrosoftEdgeWebView2Setup.exe" Installer/Bundle/Bundle.wxs -out dist/Neon_Swarm_Setup.exe
           if ($LASTEXITCODE -ne 0) { throw "Setup.exe build failed." }
 
       - name: Create complete portable package

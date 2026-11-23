@@ -4,7 +4,7 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Bundle Name="Neon Swarm Setup"
           Manufacturer="Luis Apps Inc."
-          Version="1.0.0.0"
+          Version="$(var.BundleVersion)"
           UpgradeCode="D3F2A20A-9D7B-4AF1-B1AD-75F29C93C4E6">
     <util:RegistrySearch
         Id="WebView2MachineSearch"
