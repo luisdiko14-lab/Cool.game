@@ -89,7 +89,7 @@ internal static class Program
         try
         {
             using var server = new PythonGameHost();
-            await server.StartAsync();
+            await server.StartAsync(smokeTest: true);
             using var client = new HttpClient { BaseAddress = new Uri(server.BaseUrl) };
             string health = await client.GetStringAsync("api/health");
             Check(health.Contains("neon-web-python"), "Python server health endpoint is missing.");
@@ -496,7 +496,7 @@ internal sealed class PythonGameHost : IDisposable
     private bool _disposed;
     public string BaseUrl { get; private set; } = "";
 
-    public async Task StartAsync()
+    public async Task StartAsync(bool smokeTest = false)
     {
         string executable = Path.Combine(AppContext.BaseDirectory, "neon_web_python.exe");
         if (!File.Exists(executable))
@@ -520,6 +520,12 @@ internal sealed class PythonGameHost : IDisposable
                      "--log-file", logPath })
             start.ArgumentList.Add(arg);
         start.Environment["NEON_SWARM_APP_DIR"] = DesktopPaths.DataDirectory;
+        if (smokeTest)
+        {
+            // Test-only Fernet key: enables encrypted save tests in GitHub Actions,
+            // where auth.py intentionally refuses to create a persistent key.
+            start.Environment["NEON_SWARM_DATA_KEY"] = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
+        }
         _process = new Process { StartInfo = start, EnableRaisingEvents = true };
         if (!_process.Start())
             throw new InvalidOperationException("Windows could not start neon_web_python.exe.");

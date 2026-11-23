@@ -42,6 +42,7 @@ try {
         "--specpath", (Join-Path $dist "python-spec"),
         "--collect-all", "cryptography", "--hidden-import", "auth"
     )
+    $pythonArgs += @("--add-data", "$(Join-Path $repoRoot 'public');public")
     foreach ($asset in @(
         "neon_swarm_features.js",
         "neon_swarm_expansion.js",
