@@ -87,26 +87,48 @@ internal static class Program
     {
         try
         {
-            using var server = new GameServer();
+            using var server = new PythonGameHost();
             await server.StartAsync();
             using var client = new HttpClient { BaseAddress = new Uri(server.BaseUrl) };
+            string health = await client.GetStringAsync("api/health");
+            Check(health.Contains("neon-web-python"), "Python server health endpoint is missing.");
             string html = await client.GetStringAsync("");
-            Check(html.Contains("menu-shell"), "Updated menu HTML is missing.");
-            Check(html.Contains("export-progress"), "Save-transfer controls are missing.");
+            Check(html.Contains("menu-shell"), "Python-served game HTML is missing.");
             Check(html.Contains("NeonSwarmDesktopAdmin"), "Desktop admin bridge is missing.");
             Check(html.Contains("DesktopRenderOptions"), "Render profile logic is missing.");
-            foreach (string module in new[] { "neon_swarm_features.js", "neon_swarm_expansion.js", "neon_swarm_apex.js" })
+            foreach (string module in new[] { "neon_swarm_features.js", "neon_swarm_expansion.js", "neon_swarm_apex.js", "neon_swarm_ultimate.js", "neon_swarm_round2.js" })
                 Check((await client.GetStringAsync(module)).Length > 100, $"Game module is missing: {module}");
             Check((await client.GetAsync("api/auth")).IsSuccessStatusCode, "Offline auth status failed.");
+            Check((await client.GetAsync("api/rooms")).IsSuccessStatusCode, "Room directory read failed.");
+            Check((await client.GetAsync("api/events")).IsSuccessStatusCode, "Live event read failed.");
+
+            using var roomPayload = new StringContent("{\"name\":\"CI Lobby\",\"playerName\":\"CI Pilot\",\"maxPlayers\":4}", Encoding.UTF8, "application/json");
+            using var createdRoom = await client.PostAsync("api/rooms", roomPayload);
+            Check((int)createdRoom.StatusCode == 201, "Python room creation failed.");
+            using var roomDoc = JsonDocument.Parse(await createdRoom.Content.ReadAsStringAsync());
+            string roomId = roomDoc.RootElement.GetProperty("room").GetProperty("id").GetString() ?? "";
+            string roomToken = roomDoc.RootElement.GetProperty("token").GetString() ?? "";
+            Check(roomId.Length > 0 && roomToken.Length > 0, "Room credentials were not returned.");
+            using var heartbeat = new HttpRequestMessage(HttpMethod.Post, $"api/rooms/{roomId}/heartbeat");
+            heartbeat.Headers.Add("X-Player-Token", roomToken);
+            heartbeat.Content = new StringContent("{\"x\":0.4,\"y\":0.7,\"hp\":150,\"score\":123}", Encoding.UTF8, "application/json");
+            using var beatResponse = await client.SendAsync(heartbeat);
+            Check(beatResponse.IsSuccessStatusCode, "Room player heartbeat failed.");
+
+            using var marketSession = new StringContent("{\"name\":\"CI Pilot\"}", Encoding.UTF8, "application/json");
+            using var marketResponse = await client.PostAsync("api/market/session", marketSession);
+            Check((int)marketResponse.StatusCode == 201, "Marketplace session creation failed.");
+            using var marketDoc = JsonDocument.Parse(await marketResponse.Content.ReadAsStringAsync());
+            string marketToken = marketDoc.RootElement.GetProperty("token").GetString() ?? "";
+            using var listings = new HttpRequestMessage(HttpMethod.Get, "api/market/listings");
+            listings.Headers.Add("X-Market-Token", marketToken);
+            using var listingsResponse = await client.SendAsync(listings);
+            Check(listingsResponse.IsSuccessStatusCode, "Marketplace listing directory failed.");
 
             using var score = new StringContent("{\"name\":\"CI Pilot\",\"score\":12345}", Encoding.UTF8, "application/json");
             Check((await client.PostAsync("api/scores", score)).IsSuccessStatusCode, "Offline leaderboard write failed.");
-
-            using var save = new StringContent(
-                "{\"token\":\"0123456789abcdef0123456789abcdef\",\"data\":{\"neonswarm.profile\":{\"credits\":10}}}",
-                Encoding.UTF8, "application/json");
+            using var save = new StringContent("{\"token\":\"0123456789abcdef0123456789abcdef\",\"data\":{\"neonswarm.profile\":{\"credits\":10}}}", Encoding.UTF8, "application/json");
             Check((await client.PostAsync("api/saves", save)).IsSuccessStatusCode, "Offline save write failed.");
-
             using var request = new HttpRequestMessage(HttpMethod.Get, "Raya(Slowed).mp3");
             request.Headers.Range = new RangeHeaderValue(0, 15);
             using var audio = await client.SendAsync(request);
@@ -116,9 +138,9 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            CrashLog.Write("Desktop server smoke test failed", ex);
+            CrashLog.Write("Python desktop server smoke test failed", ex);
             try { File.WriteAllText(Path.Combine(Path.GetTempPath(), "NeonSwarm-SmokeTest.log"), ex.ToString()); } catch { }
-            Console.Error.WriteLine("Desktop server smoke test failed:");
+            Console.Error.WriteLine("Python desktop server smoke test failed:");
             Console.Error.WriteLine(ex);
             return 1;
         }
@@ -152,7 +174,7 @@ internal static class CrashLog
 
 internal sealed class MainForm : Form
 {
-    private readonly GameServer _server = new();
+    private readonly PythonGameHost _server = new();
     private readonly WebView2 _browser = new();
     private readonly ToolStripStatusLabel _status = new();
     private readonly LaunchOptions _launchOptions;
@@ -425,6 +447,106 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex) { CrashLog.Write("Shutdown cleanup error", ex); }
         base.OnFormClosed(e);
+    }
+}
+
+internal sealed class PythonGameHost : IDisposable
+{
+    private Process? _process;
+    private bool _disposed;
+    public string BaseUrl { get; private set; } = "";
+
+    public async Task StartAsync()
+    {
+        string executable = Path.Combine(AppContext.BaseDirectory, "neon_web_python.exe");
+        if (!File.Exists(executable))
+            throw new FileNotFoundException("neon_web_python.exe is missing from the published app.", executable);
+
+        using var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        BaseUrl = $"http://127.0.0.1:{port}/";
+
+        string logPath = Path.Combine(GameServer.DataDirectory, "neon_web_python.log");
+        var start = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            WorkingDirectory = AppContext.BaseDirectory
+        };
+        foreach (string arg in new[] { "--server", "--lan", "--no-browser", "--port", port.ToString(),
+                     "--log-file", logPath })
+            start.ArgumentList.Add(arg);
+        start.Environment["NEON_SWARM_APP_DIR"] = GameServer.DataDirectory;
+        _process = new Process { StartInfo = start, EnableRaisingEvents = true };
+        if (!_process.Start())
+            throw new InvalidOperationException("Windows could not start neon_web_python.exe.");
+
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        Exception? lastError = null;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (_process.HasExited)
+            {
+                string log = ReadLogTail(logPath);
+                throw new InvalidOperationException(
+                    $"The Python game backend exited with code {_process.ExitCode}. {log}");
+            }
+            try
+            {
+                using var response = await client.GetAsync(BaseUrl + "api/health");
+                if (response.IsSuccessStatusCode)
+                {
+                    string body = await response.Content.ReadAsStringAsync();
+                    if (body.Contains("neon-web-python", StringComparison.Ordinal))
+                        return;
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+            {
+                lastError = ex;
+            }
+            await Task.Delay(250);
+        }
+
+        string detail = ReadLogTail(logPath);
+        throw new TimeoutException(
+            "The Python game backend did not become ready within 30 seconds. " +
+            (lastError?.Message ?? "") + " " + detail);
+    }
+
+    private static string ReadLogTail(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return "Python server log has not been created.";
+            var lines = File.ReadAllLines(path);
+            return string.Join(Environment.NewLine, lines.TakeLast(18));
+        }
+        catch { return "Could not read the Python server log."; }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        try
+        {
+            if (_process is { HasExited: false })
+            {
+                _process.Kill(entireProcessTree: true);
+                _process.WaitForExit(5000);
+            }
+        }
+        catch (Exception ex) { CrashLog.Write("Could not stop Python game backend", ex); }
+        finally
+        {
+            _process?.Dispose();
+            _process = null;
+        }
     }
 }
 
