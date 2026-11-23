@@ -89,6 +89,7 @@ internal static class Program
         catch (Exception ex)
         {
             CrashLog.Write("Desktop server smoke test failed", ex);
+            try { File.WriteAllText(Path.Combine(Path.GetTempPath(), "NeonSwarm-SmokeTest.log"), ex.ToString()); } catch { }
             Console.Error.WriteLine("Desktop server smoke test failed:");
             Console.Error.WriteLine(ex);
             return 1;
