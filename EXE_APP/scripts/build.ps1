@@ -95,18 +95,6 @@ try {
         return
     }
 
- -ForegroundColor Cyan
-    $extraProjects = @(
-        "Picker/Picker.csproj",
-        "AdminPanel/AdminPanel.csproj",
-        "UpdateChecker/UpdateChecker.csproj",
-        "WebViewBackground/WebViewBackground.csproj"
-    )
-    foreach ($project in $extraProjects) {
-        & dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=true -o $publish
-        if ($LASTEXITCODE -ne 0) { throw "Publish failed: $project" }
-    }
-
     Write-Host "[4/5] Preparing WiX Toolset 6 and WebView2..." -ForegroundColor Cyan
     if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
         & dotnet tool install --global wix --version 6.0.0
