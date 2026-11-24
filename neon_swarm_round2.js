@@ -44,7 +44,7 @@ const missions = [
   {id:'core',title:'05 · HEART OF THE SWARM',subtitle:'Defeat the final storyline boss.',wave:60,lines:['This is it. The signal is the hive mind.','Destroy the Heart of the Swarm and end the invasion.'],done:'The Heart has gone dark. The Neon Swarm is over.'}
 ];
 let activeTab='story',panel=null,dialog=null,dialogDone=null,serverRows=[],marketRows=[],eventInfo=null;
-let pendingRun=null,runStartAt=0,remoteChallenges=[],replayFrames=[],replayAccumulator=0,replayTimer=null,replayIndex=0,replaySpeed=1,replayCamera='follow',dialogTypeTimer=null;
+let pendingRun=null,runStartAt=0,remoteChallenges=[],replayFrames=[],killHighlights=[],replayAccumulator=0,replayTimer=null,replayIndex=0,replaySpeed=1,replayCamera='follow',dialogTypeTimer=null;
 let droneClocks={},mutationClock=0,lastEventSend=0,room=null,roomTimer=null,remotePlayers=[],marketToken=localStorage.getItem('neonswarm.market-token')||'';
 let round2Overlay=null,overlayCtx=null,overlayScale=1,overlayWidth=0,overlayHeight=0,overlayRaf=0;
 const themes=['NEON RUINS','FROST GRID','VOID GARDEN','SOLAR FOUNDRY','ABYSSAL LAB'];
