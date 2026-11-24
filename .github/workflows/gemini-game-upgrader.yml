@@ -73,6 +73,7 @@ jobs:
           OPENROUTER_MODEL: ${{ inputs.model || 'openai/gpt-oss-120b' }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}
           GROQ_MODEL: ${{ vars.GROQ_MODEL || 'qwen/qwen3.8-27b' }}
+          GROQ_FALLBACK_MODELS: ${{ vars.GROQ_FALLBACK_MODELS || 'llama-3.1-8b-instant,openai/gpt-oss-20b,openai/gpt-oss-120b' }}
           UPGRADE_GOAL: ${{ inputs.goal }}
         run: python .github/scripts/ai_game_upgrader.py
 
