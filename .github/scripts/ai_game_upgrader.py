@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path.cwd()
 SUMMARY = ROOT / "ai-upgrade-summary.md"
-MAX_CONTEXT = 140_000
+MAX_CONTEXT = 16_000
 MAX_REPLACEMENTS = 50_000
 
 
@@ -78,20 +78,29 @@ source and occur exactly once in that file. The edits array MUST NOT be empty. r
 exact occurrence. Escape all strings as valid JSON. Do NOT output diffs, patches, full files,
 Markdown fences, or explanations. Never invent unseen anchors or symbols. If a large feature is risky, implement a smaller safe improvement instead. Never return an empty edits array.
 """.strip()
-    parts = [f"UPGRADE GOAL:\n{goal}\n", "CURRENT SOURCE FILES:"]
+    # Keep the complete request comfortably below Groq's observed 7K input-token
+    # per-minute limit. Send a focused excerpt, never the whole repository.
+    parts = [f"UPGRADE GOAL:\n{goal[:1500]}\n", "CURRENT SOURCE FILE EXCERPTS (anchors must be copied exactly from these excerpts):"]
     budget = MAX_CONTEXT
-    for name, body in sources.items():
-        if len(body) <= budget:
-            excerpt = body
-        elif name == "Neon Swarm.html":
-            raise RuntimeError("Main HTML exceeds the source-context limit.")
-        else:
-            half = max(0, budget // 2)
-            excerpt = body[:half] + "\n[Middle omitted; edits must still match the full file]\n" + body[-half:]
-        parts.append(f"\n===== FILE: {name} =====\n{excerpt}\n")
-        budget -= len(excerpt)
+    ordered = list(sources.items())
+    for index, (name, body) in enumerate(ordered):
         if budget <= 0:
             break
+        if name == "Neon Swarm.html":
+            allowance = min(len(body), min(12_000, budget))
+        else:
+            remaining_files = max(1, len(ordered) - index)
+            allowance = min(len(body), max(0, budget // remaining_files))
+        if allowance <= 0:
+            continue
+        if len(body) <= allowance:
+            excerpt = body
+        else:
+            head = max(1, allowance * 2 // 3)
+            tail = max(0, allowance - head)
+            excerpt = body[:head] + "\n[... middle of file omitted to control API cost ...]\n" + (body[-tail:] if tail else "")
+        parts.append(f"\n===== FILE: {name} =====\n{excerpt}\n")
+        budget -= len(excerpt)
     return system, "\n".join(parts)
 
 
@@ -316,12 +325,12 @@ def main():
         return 1
 
     groq_key = os.getenv("GROQ_API_KEY", os.getenv("GROQ_API", "")).strip()
-    groq_primary = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b").strip()
+    groq_primary = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b").strip()
     groq_fallbacks = [
         model.strip()
         for model in os.getenv(
             "GROQ_FALLBACK_MODELS",
-            "llama-3.1-8b-instant,openai/gpt-oss-20b,openai/gpt-oss-120b",
+            "",
         ).split(",")
         if model.strip() and model.strip() != groq_primary
     ]
