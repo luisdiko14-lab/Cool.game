@@ -12,7 +12,7 @@ on:
         description: "OpenRouter model ID (provider/model)"
         required: false
         type: string
-        default: "openai/gpt-oss-120b"
+        default: "openai/gpt-oss-20b"
 
 permissions:
   contents: write
@@ -70,10 +70,10 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.GEMINI_API || secrets.GEMINI_SECRET || secrets.GOOGLE_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API || secrets.GROQ_API_KEY || secrets.GROQ_SECRET }}
-          OPENROUTER_MODEL: ${{ inputs.model || 'openai/gpt-oss-120b' }}
+          OPENROUTER_MODEL: ${{ inputs.model || 'openai/gpt-oss-20b' }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}
-          GROQ_MODEL: ${{ vars.GROQ_MODEL || 'qwen/qwen3.8-27b' }}
-          GROQ_FALLBACK_MODELS: ${{ vars.GROQ_FALLBACK_MODELS || 'llama-3.1-8b-instant,openai/gpt-oss-20b,openai/gpt-oss-120b' }}
+          GROQ_MODEL: ${{ vars.GROQ_MODEL || 'openai/gpt-oss-20b' }}
+          GROQ_FALLBACK_MODELS: ${{ vars.GROQ_FALLBACK_MODELS || '' }}
           UPGRADE_GOAL: ${{ inputs.goal }}
         run: python .github/scripts/ai_game_upgrader.py
 
