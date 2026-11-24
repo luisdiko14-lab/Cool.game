@@ -315,10 +315,30 @@ def main():
         print(f"::error::{exc}")
         return 1
 
+    groq_key = os.getenv("GROQ_API_KEY", os.getenv("GROQ_API", "")).strip()
+    groq_primary = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b").strip()
+    groq_fallbacks = [
+        model.strip()
+        for model in os.getenv(
+            "GROQ_FALLBACK_MODELS",
+            "llama-3.1-8b-instant,openai/gpt-oss-20b,openai/gpt-oss-120b",
+        ).split(",")
+        if model.strip() and model.strip() != groq_primary
+    ]
+    groq_models = [groq_primary] + groq_fallbacks
     providers = [
-        ("Groq", os.getenv("GROQ_API_KEY", os.getenv("GROQ_API", "")).strip(),
-         os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b").strip(),
-         lambda key, model: openai_compatible("https://api.groq.com/openai/v1/chat/completions", key, model, system, user, "max_completion_tokens")),
+        *[
+            (
+                "Groq" if index == 0 else f"Groq fallback {index}",
+                groq_key,
+                model,
+                lambda key, selected_model: openai_compatible(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    key, selected_model, system, user, "max_completion_tokens"
+                ),
+            )
+            for index, model in enumerate(groq_models)
+        ],
         ("OpenRouter", os.getenv("OPENROUTER_API_KEY", "").strip(),
          os.getenv("OPENROUTER_MODEL", "openai/gpt-oss-120b").strip(),
          lambda key, model: openai_compatible("https://openrouter.ai/api/v1/chat/completions", key, model, system, user)),
